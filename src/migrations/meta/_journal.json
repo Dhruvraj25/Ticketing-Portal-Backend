@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1781547748985,
+      "tag": "0000_pale_secret_warriors",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1781549227637,
+      "tag": "0001_add_project_developer",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1782453600000,
+      "tag": "0007_make_wallet_project_id_nullable",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1782991000000,
+      "tag": "0008_add_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1784266368002,
+      "tag": "0009_nebulous_doctor_octopus",
+      "breakpoints": true
+    }
+  ]
+}

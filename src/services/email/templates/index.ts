@@ -1,0 +1,37 @@
+// ============================================================================
+// Email Templates — Barrel Export
+// ============================================================================
+
+export { baseWrapper, getBranding, escapeHtml, escapeUrl, generatePlainText } from './base.template'
+export { emailHeading, emailParagraph, emailSmallText, emailFieldRow, emailFieldTable, emailButton, emailDivider, emailInfoBox, ticketMetaTable } from './base.template'
+export type { BrandingConfig } from './base.template'
+
+export { ticketCreatedTemplate } from './ticket-created'
+export { ticketAssignedTemplate } from './ticket-assigned'
+export { estimateApprovedTemplate } from './estimate-approved'
+export { estimateRejectedTemplate } from './estimate-rejected'
+export { additionalHoursTemplate } from './additional-hours'
+export { additionalHoursRejectedTemplate } from './additional-hours-rejected'
+export { ticketResolvedTemplate } from './ticket-resolved'
+export { ticketClosedTemplate } from './ticket-closed'
+export { ticketReopenedTemplate } from './ticket-reopened'
+export { ticketReassignedTemplate } from './ticket-reassigned'
+export { revisionRequestedTemplate } from './revision-requested'
+export { estimateRequestedTemplate } from './estimate-requested'
+export { additionalHoursApprovedTemplate } from './additional-hours-approved'
+export { walletEmptyTemplate } from './wallet-empty'
+export { supportHoursAddedTemplate } from './support-hours-added'
+
+export { welcomeTemplate } from './welcome'
+export { passwordResetTemplate } from './password-reset'
+export { passwordResetRequestedTemplate } from './password-reset-requested'
+export { walletLowTemplate } from './wallet-low'
+export { customerCreatedTemplate } from './customer-created'
+export { accountActivatedTemplate } from './account-activated'
+export { newProjectTemplate } from './new-project'
+export { developerStartedWorkTemplate } from './developer-started-work'
+export { developerCompletedWorkTemplate } from './developer-completed-work'
+export { revisionApprovedTemplate } from './revision-approved'
+export { revisionRejectedTemplate } from './revision-rejected'
+export { supportRenewalReminderTemplate } from './support-renewal-reminder'
+export { loginCredentialsTemplate } from './login-credentials'
