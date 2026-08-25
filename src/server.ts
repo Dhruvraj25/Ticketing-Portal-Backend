@@ -69,10 +69,10 @@ async function startServer() {
 
   // ─── Start HTTP Server ─────────────────────────────────────────────────
 
-  app.listen(PORT, function () {
+  app.listen(PORT, '0.0.0.0', function () {
     console.log(
-      '[SupportHub] Backend server running on http://localhost:' + PORT
-    )
+  '[SupportHub] Backend server running on port ' + PORT
+)
 
     console.log(
       '[SupportHub] Environment: ' +
