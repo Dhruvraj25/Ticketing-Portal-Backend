@@ -3,16 +3,19 @@ import { sendWelcomeEmail } from "../services/email/email.service";
 
 export async function sendTestEmail(req: Request, res: Response) {
   try {
+    const portalUrl =
+      process.env.FRONTEND_URL || "http://localhost:3000";
+
     sendWelcomeEmail(
       "support@infinixotech.com",
       {
         recipientName: "Infinixotech",
         recipientEmail: "support@infinixotech.com",
         companyName: "Infinixotech",
-        portalUrl: "http://localhost:3000/login",
+        portalUrl: `${portalUrl}/login`,
 
         userEmail: "support@infinixotech.com",
-        loginUrl: "http://localhost:3000/login",
+        loginUrl: `${portalUrl}/login`,
       },
       {
         immediate: true,
