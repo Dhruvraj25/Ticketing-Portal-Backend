@@ -15,7 +15,11 @@ router.post("/test-email", async (req, res) => {
   if (process.env.NODE_ENV === "production") {
     return res.status(404).json({ error: "Not found" });
   }
+const portalUrl = process.env.FRONTEND_URL;
 
+if (!portalUrl) {
+  throw new Error("FRONTEND_URL is not configured");
+}
   try {
     sendWelcomeEmail(
       "support@infinixotech.com",
@@ -23,10 +27,10 @@ router.post("/test-email", async (req, res) => {
         recipientName: "Infinixotech",
         recipientEmail: "support@infinixotech.com",
         companyName: "Infinixotech",
-        portalUrl: "http://localhost:3000/login",
-
+        portalUrl: `${portalUrl}/login`,
+        loginUrl: `${portalUrl}/login`,
         userEmail: "support@infinixotech.com",
-        loginUrl: "http://localhost:3000/login",
+        
       },
       {
         immediate: true,

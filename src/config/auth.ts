@@ -22,7 +22,6 @@ export const auth = betterAuth({
     },
   },
   trustedOrigins: [
-    'http://localhost:3000',
     ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : ['http://localhost:3000']),
   ],
   session: {
@@ -79,7 +78,11 @@ async function sendWelcomeEmailForUser(userId: string, userName: string, userEma
     // Send welcome email using the backend email service directly
     try {
       const { sendWelcomeEmail } = await import('../services/email/email.service')
-      const portalUrl = process.env.FRONTEND_URL || 'http://localhost:3000'
+     const portalUrl = process.env.FRONTEND_URL
+
+if (!portalUrl) {
+  throw new Error('FRONTEND_URL is not configured')
+}
       sendWelcomeEmail(userEmail, {
         userEmail,
         recipientName: userName,

@@ -13,8 +13,11 @@ import { sendTicketCreated, sendTicketAssigned, sendTicketResolved, sendTicketCl
 import { EMAIL_LOG_PREFIX } from './email/email.constants'
 
 /** Frontend portal URL used in email notification links. */
-const PORTAL_URL = process.env.FRONTEND_URL || 'http://localhost:3000'
+const PORTAL_URL = process.env.FRONTEND_URL;
 
+if (!PORTAL_URL) {
+  throw new Error('FRONTEND_URL is not configured');
+}
 function generateTicketNumber(): string {
   const prefix = 'TKT'
   const timestamp = Date.now().toString(36).toUpperCase()
