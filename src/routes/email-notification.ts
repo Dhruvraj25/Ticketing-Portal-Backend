@@ -51,6 +51,13 @@ import { EMAIL_LOG_PREFIX } from '../services/email/email.constants'
 
 const router = Router()
 
+const FRONTEND_URL = process.env.FRONTEND_URL?.replace(/\/$/, '')
+
+if (!FRONTEND_URL) {
+  throw new Error('FRONTEND_URL is not configured')
+}
+
+const LOGIN_URL = `${FRONTEND_URL}/sign-in`
 /**
  * POST /api/email/notification
  *
@@ -127,11 +134,26 @@ async function sendEmailNotification(
       sendWelcomeEmail(to, data, opts)
       break
     case 'customer_created':
-      sendCustomerCreated(to, data, opts)
-      break
-    case 'account_activated':
-      sendAccountActivated(to, data, opts)
-      break
+  sendCustomerCreated(
+    to,
+    {
+      ...data,
+      portalUrl: LOGIN_URL,
+    },
+    opts,
+  )
+  break
+
+case 'account_activated':
+  sendAccountActivated(
+    to,
+    {
+      ...data,
+      loginUrl: LOGIN_URL,
+    },
+    opts,
+  )
+  break
     case 'wallet_low':
       sendWalletLow(to, data, opts)
       break

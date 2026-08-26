@@ -38,6 +38,14 @@ import { EVENT_COLOR_MAP } from '../services/teams/teams.constants'
 import { loadTeamsConfig } from '../services/teams/teams-webhook-client'
 import { EMAIL_LOG_PREFIX } from '../services/email/email.constants'
 
+const FRONTEND_URL = process.env.FRONTEND_URL;
+
+if (!FRONTEND_URL) {
+  throw new Error('FRONTEND_URL is not configured');
+}
+
+const PORTAL_URL = FRONTEND_URL.replace(/\/$/, '');
+
 export type NotificationChannel = 'email' | 'teams' | 'all'
 
 export interface DispatchOptions {
@@ -213,23 +221,23 @@ async function sendEmailNotification(
       break
 
     case 'customer_created':
-      emailCustomerCreated(to, {
-        customerName: payload.clientName || '',
-        customerEmail: typeof to === 'string' ? to : to[0],
-        projectName: payload.projectName,
-        createdBy: payload.createdBy || '',
-        portalUrl: payload.url || '',
-      }, opts)
-      break
+  emailCustomerCreated(to, {
+    customerName: payload.clientName || '',
+    customerEmail: typeof to === 'string' ? to : to[0],
+    projectName: payload.projectName,
+    createdBy: payload.createdBy || '',
+    portalUrl: `${PORTAL_URL}/sign-in`,
+  }, opts)
+  break
 
     case 'account_activated':
-      emailAccountActivated(to, {
-        userEmail: typeof to === 'string' ? to : to[0],
-        userName: payload.clientName || '',
-        loginUrl: payload.url || '',
-      }, opts)
-      break
-
+  emailAccountActivated(to, {
+    userEmail: typeof to === 'string' ? to : to[0],
+    userName: payload.clientName || '',
+    loginUrl: `${PORTAL_URL}/sign-in`,
+  }, opts)
+  break
+  
     case 'estimate_requested':
       emailEstimateRequested(to, {
         ticketNumber: payload.ticketNumber || '',
