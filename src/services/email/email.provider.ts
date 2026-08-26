@@ -16,16 +16,13 @@
 // Current providers:
 //   - console (default in development): logs emails, never contacts a service
 //   - resend  : uses the singleton Resend API client (legacy production path)
-//   - microsoft-smtp : Microsoft 365 SMTP + OAuth 2.0 (XOAUTH2) via Nodemailer
-//                      (production path; requires Exchange Online authorization)
-//   - microsoft : deprecated alias for microsoft-smtp — kept for backward
-//                 compatibility with configs that still use EMAIL_PROVIDER=microsoft
+//   - microsoft-graph : Microsoft Graph API using Azure AD application authentication
+//                       (production path; requires Microsoft Graph Mail.Send permission)
 //
 // Provider selection (EMAIL_PROVIDER):
 //   EMAIL_PROVIDER=console         → console provider (development default)
 //   EMAIL_PROVIDER=resend          → Resend provider (requires RESEND_API_KEY)
-//   EMAIL_PROVIDER=microsoft-smtp  → Microsoft 365 SMTP provider (requires MICROSOFT_* vars)
-//   EMAIL_PROVIDER=microsoft       → deprecated alias → Microsoft 365 SMTP provider
+//   EMAIL_PROVIDER=microsoft-graph → Microsoft Graph email provider (requires MICROSOFT_* vars)
 //   unset                          → resend if RESEND_API_KEY is present, else console
 // ============================================================================
 
@@ -33,8 +30,7 @@ import type { EmailProvider, SendEmailParams, SendEmailResult } from './email.ty
 import { getTransporter, isTransporterReady } from './email.transporter'
 import { EMAIL_LOG_PREFIX, EMAIL_ENV_KEYS, RESEND_ENV_KEYS } from './email.constants'
 import { consoleProvider } from './providers/console.provider'
-import { microsoftSmtpProvider } from './providers/microsoft-smtp.provider'
-import { microsoftProvider } from './providers/microsoft.provider'
+import { microsoftGraphProvider } from './providers/microsoft-graph.provider'
 
 /**
  * Strip HTML tags to generate a plain text fallback.
@@ -127,9 +123,7 @@ const resendProvider: EmailProvider = {
 const providers: Record<string, EmailProvider> = {
   console: consoleProvider,
   resend: resendProvider,
-  'microsoft-smtp': microsoftSmtpProvider,
-  // Deprecated alias — kept so EMAIL_PROVIDER=microsoft still resolves.
-  microsoft: microsoftProvider,
+  'microsoft-graph': microsoftGraphProvider,
 }
 
 /**
@@ -156,10 +150,6 @@ export function getProvider(): EmailProvider {
   if (!provider) {
     console.warn(`${EMAIL_LOG_PREFIX} Unknown provider type '${providerName}'. Falling back to 'console'.`)
     return providers.console
-  }
-
-  if (providerName === 'microsoft') {
-    console.warn(`${EMAIL_LOG_PREFIX} EMAIL_PROVIDER=microsoft is deprecated — use EMAIL_PROVIDER=microsoft-smtp.`)
   }
 
   return provider
