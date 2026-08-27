@@ -151,7 +151,11 @@ uploadRouter.post(
     }
   }
 )
-
+console.log('[Cloudinary] Runtime configuration:', {
+  cloudNameConfigured: !!process.env.CLOUDINARY_CLOUD_NAME,
+  apiKeyConfigured: !!process.env.CLOUDINARY_API_KEY,
+  apiSecretConfigured: !!process.env.CLOUDINARY_API_SECRET,
+})
 // ─── Error handler for multer errors propagated from middleware ─────────
 uploadRouter.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   console.error('[upload] Unhandled upload error:', {
@@ -168,4 +172,5 @@ uploadRouter.use((err: any, _req: Request, res: Response, _next: NextFunction) =
     return res.status(400).json({ error: err.message })
   }
   return res.status(500).json({ error: err.message || 'Upload failed' })
+  
 })
