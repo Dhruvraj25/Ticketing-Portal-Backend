@@ -255,7 +255,8 @@ export const OVERRIDE_REASONS: OverrideReasonType[] = [
 export interface SupportWallet {
   id: number
   clientId: string
-  projectId: number
+  /** @deprecated Wallets are now client-level. projectId is kept for backward compatibility only. */
+  projectId: number | null
   totalPurchasedHours: number
   reservedHours: number
   consumedHours: number
@@ -267,7 +268,9 @@ export interface SupportWallet {
   updatedAt: Date
   clientName?: string
   clientEmail?: string
+  /** @deprecated Wallets are now client-level. */
   projectName?: string
+  /** @deprecated Wallets are now client-level. */
   projectCode?: string
 }
 
@@ -293,6 +296,7 @@ export interface WalletAlert {
   createdAt: Date
   resolvedAt: Date | null
   clientName?: string
+  /** @deprecated Wallets are now client-level. */
   projectName?: string
 }
 

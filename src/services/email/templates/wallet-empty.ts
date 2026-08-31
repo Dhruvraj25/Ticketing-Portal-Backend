@@ -9,7 +9,7 @@ export function walletEmptyTemplate(
   const content =
     emailHeading('Support Hours Exhausted') +
     emailParagraph(
-      `Your support wallet for "${data.projectName}" has been fully exhausted. No support hours remain.`
+      `Your support wallet has been fully exhausted. No support hours remain.`
     ) +
     emailParagraph(
       'To continue receiving support, please purchase additional hours at your earliest convenience.'

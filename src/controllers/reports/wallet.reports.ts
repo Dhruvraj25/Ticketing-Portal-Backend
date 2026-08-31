@@ -1,12 +1,13 @@
 import { db } from '../../config/db'
-import { supportWallet, walletTransaction, project } from '../../models/schema'
-import { and, eq, desc, count, inArray, gte, lte, sum } from 'drizzle-orm'
+import { supportWallet, walletTransaction, project, ticket, module, user } from '../../models/schema'
+import { and, eq, desc, count, inArray, gte, lte, sum, sql } from 'drizzle-orm'
 import type { ReportFilters, ReportResult } from './types'
 import { getDateRange } from './utils'
 
 /**
  * Get wallet IDs visible to the current user based on their role.
- * Avoids duplicating this logic across 4 report functions.
+ * In the one-wallet-per-client architecture, each client has exactly one wallet.
+ * Admins/Managers can filter by clientId.
  */
 async function getVisibleWalletIds(currentUser: { id: string; role: string }, filters: ReportFilters): Promise<number[]> {
   const walletIds: Set<number> = new Set()
@@ -38,12 +39,15 @@ async function getVisibleWalletIds(currentUser: { id: string; role: string }, fi
   return [...walletIds]
 }
 
+/**
+ * Support Wallet Report — One row per client wallet.
+ * Each client has exactly ONE wallet in the new architecture.
+ */
 export async function getSupportWalletReport(filters: ReportFilters, currentUser: { id: string; role: string }): Promise<ReportResult> {
   const conditions: any[] = []
   if (currentUser.role === 'client') conditions.push(eq(supportWallet.clientId, currentUser.id))
   if (filters.clientId) conditions.push(eq(supportWallet.clientId, filters.clientId))
 
-  // OPTIMIZED: Select only the 5 columns needed instead of SELECT *
   const wallets = await db
     .select({
       id: supportWallet.id,
@@ -60,17 +64,52 @@ export async function getSupportWalletReport(filters: ReportFilters, currentUser
   const totalConsumed = wallets.reduce((s, w) => s + Number(w.consumedHours), 0)
   const totalRemaining = wallets.reduce((s, w) => s + Number(w.remainingHours), 0)
 
+  // For client name resolution, we need to join with user table
+  const clientIds = wallets.map(w => w.clientId)
+  const clients = clientIds.length > 0
+    ? await db.select({ id: user.id, name: user.name }).from(user).where(inArray(user.id, clientIds))
+    : []
+  const clientMap = new Map(clients.map(c => [c.id, c.name]))
+
   return {
-    meta: { totalRecords: wallets.length, generatedAt: new Date().toISOString(), appliedFilters: Object.entries(filters).filter(([_, v]) => v).map(([k]) => k.replace(/_/g, ' ')), summary: { 'Total Wallets': wallets.length, 'Total Purchased': `${totalPurchased}h`, 'Total Consumed': `${totalConsumed}h`, 'Total Remaining': `${totalRemaining}h` } },
-    columns: [{ key: 'clientId', label: 'Client', type: 'text' }, { key: 'totalPurchasedHours', label: 'Purchased', type: 'number' }, { key: 'consumedHours', label: 'Consumed', type: 'number' }, { key: 'remainingHours', label: 'Remaining', type: 'number' }, { key: 'status', label: 'Status', type: 'badge' }],
-    data: wallets.map(w => ({ clientId: w.clientId, totalPurchasedHours: w.totalPurchasedHours, consumedHours: w.consumedHours, remainingHours: w.remainingHours, status: w.status })),
-    charts: [{ type: 'bar', title: 'Remaining Hours per Wallet', data: wallets.map(w => ({ name: `Wallet #${w.id}`, value: Number(w.remainingHours) })) }],
+    meta: {
+      totalRecords: wallets.length,
+      generatedAt: new Date().toISOString(),
+      appliedFilters: Object.entries(filters).filter(([_, v]) => v).map(([k]) => k.replace(/_/g, ' ')),
+      summary: {
+        'Total Client Wallets': wallets.length,
+        'Total Purchased': `${totalPurchased}h`,
+        'Total Consumed': `${totalConsumed}h`,
+        'Total Remaining': `${totalRemaining}h`,
+      },
+    },
+    columns: [
+      { key: 'clientName', label: 'Client', type: 'text' },
+      { key: 'totalPurchasedHours', label: 'Purchased', type: 'number' },
+      { key: 'consumedHours', label: 'Consumed', type: 'number' },
+      { key: 'remainingHours', label: 'Remaining', type: 'number' },
+      { key: 'status', label: 'Status', type: 'badge' },
+    ],
+    data: wallets.map(w => ({
+      clientName: clientMap.get(w.clientId) || w.clientId,
+      totalPurchasedHours: w.totalPurchasedHours,
+      consumedHours: w.consumedHours,
+      remainingHours: w.remainingHours,
+      status: w.status,
+    })),
+    charts: [{
+      type: 'bar',
+      title: 'Remaining Hours per Client Wallet',
+      data: wallets.map(w => ({
+        name: clientMap.get(w.clientId) || `Client`,
+        value: Number(w.remainingHours),
+      })),
+    }],
   }
 }
 
 /**
- * Reusable wallet transaction fetcher — all 3 transaction reports
- * (getWalletTransactionReport, getWalletConsumptionReport, getWalletHistoryReport)
+ * Reusable wallet transaction fetcher — all transaction reports
  * use this instead of duplicating the wallet-lookup logic.
  */
 async function fetchWalletTransactions(
@@ -87,9 +126,14 @@ async function fetchWalletTransactions(
       hours: walletTransaction.hours,
       performedAt: walletTransaction.performedAt,
       reason: walletTransaction.reason,
+      remarks: walletTransaction.remarks,
     })
     .from(walletTransaction)
-    .where(and(inArray(walletTransaction.walletId, walletIds), gte(walletTransaction.performedAt, since), lte(walletTransaction.performedAt, until)))
+    .where(and(
+      inArray(walletTransaction.walletId, walletIds),
+      gte(walletTransaction.performedAt, since),
+      lte(walletTransaction.performedAt, until),
+    ))
     .orderBy(desc(walletTransaction.performedAt))
     .limit(limit)
 }
@@ -104,9 +148,33 @@ export async function getWalletTransactionReport(filters: ReportFilters, current
   const rows = await fetchWalletTransactions(walletIds, since, until, 200)
 
   return {
-    meta: { totalRecords: rows.length, generatedAt: new Date().toISOString(), appliedFilters: Object.entries(filters).filter(([_, v]) => v).map(([k]) => k.replace(/_/g, ' ')), summary: { 'Total Transactions': rows.length } },
-    columns: [{ key: 'transactionType', label: 'Type', type: 'badge' }, { key: 'hours', label: 'Hours', type: 'number' }, { key: 'performedAt', label: 'Date', type: 'date' }, { key: 'reason', label: 'Reason', type: 'text' }],
-    data: rows.map(r => ({ transactionType: r.transactionType, hours: r.hours, performedAt: r.performedAt.toISOString(), reason: r.reason || '' })),
+    meta: {
+      totalRecords: rows.length,
+      generatedAt: new Date().toISOString(),
+      appliedFilters: Object.entries(filters).filter(([_, v]) => v).map(([k]) => k.replace(/_/g, ' ')),
+      summary: { 'Total Transactions': rows.length },
+    },
+    columns: [
+      { key: 'transactionType', label: 'Type', type: 'badge' },
+      { key: 'hours', label: 'Hours', type: 'number' },
+      { key: 'performedAt', label: 'Date', type: 'date' },
+      { key: 'reason', label: 'Reason', type: 'text' },
+    ],
+    data: rows.map(r => {
+      // Try to extract project/module from remarks JSON
+      let projectInfo = ''
+      try {
+        const remarks = r.remarks ? JSON.parse(r.remarks) : null
+        if (remarks?.projectId) projectInfo = `Project #${remarks.projectId}`
+        if (remarks?.moduleId) projectInfo += ` / Module #${remarks.moduleId}`
+      } catch { /* not JSON */ }
+      return {
+        transactionType: r.transactionType,
+        hours: r.hours,
+        performedAt: r.performedAt.toISOString(),
+        reason: r.reason || projectInfo || '',
+      }
+    }),
   }
 }
 
@@ -132,14 +200,29 @@ export async function getWalletConsumptionReport(filters: ReportFilters, current
   const { totalAdded, totalUsed } = await getTransactionStats(rows)
 
   return {
-    meta: { totalRecords: rows.length, generatedAt: new Date().toISOString(), appliedFilters: [], summary: { 'Total Transactions': rows.length, 'Total Hours Added': totalAdded, 'Total Hours Used': totalUsed } },
-    columns: [{ key: 'date', label: 'Date', type: 'date' }, { key: 'added', label: 'Hours Added', type: 'number' }, { key: 'used', label: 'Hours Used', type: 'number' }, { key: 'balance', label: 'Balance', type: 'number' }],
+    meta: {
+      totalRecords: rows.length,
+      generatedAt: new Date().toISOString(),
+      appliedFilters: [],
+      summary: { 'Total Transactions': rows.length, 'Total Hours Added': totalAdded, 'Total Hours Used': totalUsed },
+    },
+    columns: [
+      { key: 'date', label: 'Date', type: 'date' },
+      { key: 'added', label: 'Hours Added', type: 'number' },
+      { key: 'used', label: 'Hours Used', type: 'number' },
+      { key: 'balance', label: 'Balance', type: 'number' },
+    ],
     data: (() => {
       let bal = 0
       return [...rows].sort((a, b) => new Date(a.performedAt).getTime() - new Date(b.performedAt).getTime()).map(r => {
         if (isAdd(r)) bal += r.hours
         else if (isDeduct(r)) bal -= r.hours
-        return { date: r.performedAt.toISOString().split('T')[0], added: isAdd(r) ? r.hours : 0, used: isDeduct(r) ? r.hours : 0, balance: bal }
+        return {
+          date: r.performedAt.toISOString().split('T')[0],
+          added: isAdd(r) ? r.hours : 0,
+          used: isDeduct(r) ? r.hours : 0,
+          balance: bal,
+        }
       })
     })(),
   }
@@ -157,8 +240,31 @@ export async function getWalletHistoryReport(filters: ReportFilters, currentUser
   const { totalAdded, totalUsed } = await getTransactionStats(rows)
 
   return {
-    meta: { totalRecords: rows.length, generatedAt: new Date().toISOString(), appliedFilters: Object.entries(filters).filter(([_, v]) => v).map(([k]) => k.replace(/_/g, ' ')), summary: { 'Total Transactions': rows.length, 'Total Hours Added': totalAdded, 'Total Hours Used': totalUsed } },
-    columns: [{ key: 'transactionType', label: 'Type', type: 'badge' }, { key: 'hours', label: 'Hours', type: 'number' }, { key: 'performedAt', label: 'Date', type: 'date' }, { key: 'reason', label: 'Reason', type: 'text' }],
-    data: rows.map(r => ({ transactionType: r.transactionType, hours: r.hours, performedAt: r.performedAt.toISOString(), reason: r.reason || '' })),
+    meta: {
+      totalRecords: rows.length,
+      generatedAt: new Date().toISOString(),
+      appliedFilters: Object.entries(filters).filter(([_, v]) => v).map(([k]) => k.replace(/_/g, ' ')),
+      summary: { 'Total Transactions': rows.length, 'Total Hours Added': totalAdded, 'Total Hours Used': totalUsed },
+    },
+    columns: [
+      { key: 'transactionType', label: 'Type', type: 'badge' },
+      { key: 'hours', label: 'Hours', type: 'number' },
+      { key: 'performedAt', label: 'Date', type: 'date' },
+      { key: 'reason', label: 'Reason', type: 'text' },
+    ],
+    data: rows.map(r => {
+      let projectInfo = ''
+      try {
+        const remarks = r.remarks ? JSON.parse(r.remarks) : null
+        if (remarks?.projectId) projectInfo = `Project #${remarks.projectId}`
+        if (remarks?.moduleId) projectInfo += ` / Module #${remarks.moduleId}`
+      } catch { /* not JSON */ }
+      return {
+        transactionType: r.transactionType,
+        hours: r.hours,
+        performedAt: r.performedAt.toISOString(),
+        reason: r.reason || projectInfo || '',
+      }
+    }),
   }
 }

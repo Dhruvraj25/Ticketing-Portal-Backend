@@ -237,7 +237,9 @@ export interface PasswordResetRequestedTemplateData extends BaseTemplateData {
 }
 
 export interface WalletLowTemplateData extends BaseTemplateData {
-  projectName: string
+  /** @deprecated Use clientName instead. Wallet is client-level, not project-level. */
+  projectName?: string
+  clientName?: string
   remainingHours: number
   threshold: number
   walletLink: string
@@ -314,14 +316,18 @@ export interface AdditionalHoursApprovedTemplateData extends BaseTemplateData {
 // ─── Wallet Empty ─────────────────────────────────────────────────────────
 
 export interface WalletEmptyTemplateData extends BaseTemplateData {
-  projectName: string
+  /** @deprecated Use clientName instead. Wallet is client-level, not project-level. */
+  projectName?: string
+  clientName?: string
   walletLink: string
 }
 
 // ─── Support Hours Added ──────────────────────────────────────────────────
 
 export interface SupportHoursAddedTemplateData extends BaseTemplateData {
-  projectName: string
+  /** @deprecated Use clientName instead. Wallet is client-level, not project-level. */
+  projectName?: string
+  clientName?: string
   addedHours: number
   newBalance: number
   transactionType?: string

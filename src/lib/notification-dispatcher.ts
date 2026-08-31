@@ -315,6 +315,7 @@ async function sendEmailNotification(
 
     case 'wallet_low':
       emailWalletLow(to, {
+        clientName: payload.clientName || payload.projectName || '',
         projectName: payload.projectName || '',
         remainingHours: payload.estimateHours || 0,
         threshold: 5,
@@ -324,6 +325,7 @@ async function sendEmailNotification(
 
     case 'wallet_empty':
       emailWalletEmpty(to, {
+        clientName: payload.clientName || payload.projectName || '',
         projectName: payload.projectName || '',
         walletLink: payload.url || '',
       }, opts)
@@ -331,6 +333,7 @@ async function sendEmailNotification(
 
     case 'support_hours_added':
       emailSupportHoursAdded(to, {
+        clientName: payload.clientName || payload.projectName || '',
         projectName: payload.projectName || '',
         addedHours: payload.additionalHours || 0,
         newBalance: payload.estimateHours || 0,

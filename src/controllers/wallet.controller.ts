@@ -5,14 +5,14 @@ import type { AuthenticatedUser } from '../services/user.service'
 export const getWallets = wrapController('getWallets', async (currentUser: AuthenticatedUser) =>
   walletService.getWallets(currentUser))
 
-export const getWalletById = wrapController('getWalletById', async (walletId: number) =>
-  walletService.getWalletById(walletId))
+export const getWalletById = wrapController('getWalletById', async (walletId: number, currentUser: AuthenticatedUser) =>
+  walletService.getWalletById(walletId, currentUser))
 
-export const getWalletTransactions = wrapController('getWalletTransactions', async (walletId: number) =>
-  walletService.getWalletTransactions(walletId))
+export const getWalletTransactions = wrapController('getWalletTransactions', async (walletId: number, currentUser: AuthenticatedUser) =>
+  walletService.getWalletTransactions(walletId, currentUser))
 
-export const getWalletTicketConsumption = wrapController('getWalletTicketConsumption', async (walletId: number) =>
-  walletService.getWalletTicketConsumption(walletId))
+export const getWalletTicketConsumption = wrapController('getWalletTicketConsumption', async (walletId: number, currentUser: AuthenticatedUser) =>
+  walletService.getWalletTicketConsumption(walletId, currentUser))
 
 export const addWalletHours = wrapController('addWalletHours', async (data: any, currentUser: AuthenticatedUser) =>
   walletService.addWalletHours(data, currentUser))

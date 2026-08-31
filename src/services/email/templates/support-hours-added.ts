@@ -9,7 +9,7 @@ export function supportHoursAddedTemplate(
   const content =
     emailHeading('Support Hours Added') +
     emailParagraph(
-      'Support hours have been added to your wallet for "' + data.projectName + '".'
+      'Support hours have been added to your wallet.'
     ) +
     emailFieldTable(
       emailFieldRow('Hours Added', data.addedHours + 'h') +

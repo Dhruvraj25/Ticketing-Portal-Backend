@@ -518,7 +518,7 @@ export function sendWalletEmpty(
 
   return send({
     to,
-    subject: `Support Hours Exhausted — ${data.projectName}`,
+    subject: `Support Hours Exhausted — ${data.clientName || data.projectName || 'Client'}`,
     html,
     eventType: 'wallet_empty',
     cc: options?.cc,
@@ -541,7 +541,7 @@ export function sendSupportHoursAdded(
 
   return send({
     to,
-    subject: `Support Hours Added — ${data.projectName}`,
+    subject: `Support Hours Added — ${data.clientName || data.projectName || 'Client'}`,
     html,
     eventType: 'support_hours_added',
     cc: options?.cc,
@@ -635,7 +635,7 @@ export function sendWalletLow(
 
   return send({
     to,
-    subject: `Support Hours Running Low — ${data.projectName}`,
+    subject: `Support Hours Running Low — ${data.clientName || data.projectName || 'Client'}`,
     html,
     eventType: 'wallet_low',
     cc: options?.cc,

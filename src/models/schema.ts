@@ -445,6 +445,8 @@ export const supportWalletRelations = relations(supportWallet, ({ one }) => ({
     fields: [supportWallet.clientId],
     references: [user.id],
   }),
+  // DEPRECATED: project relation kept for backward compatibility.
+  // Wallet ownership is determined by clientId only.
   project: one(project, {
     fields: [supportWallet.projectId],
     references: [project.id],

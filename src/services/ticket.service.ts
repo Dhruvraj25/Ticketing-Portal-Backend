@@ -11,6 +11,7 @@ import { getProjectNames } from './project.service'
 import { getModuleNames } from './module.service'
 import { sendTicketCreated, sendTicketAssigned, sendTicketResolved, sendTicketClosed } from './email/email.service'
 import { EMAIL_LOG_PREFIX } from './email/email.constants'
+import * as walletService from './wallet.service'
 
 /** Frontend portal URL used in email notification links. */
 const PORTAL_URL = process.env.FRONTEND_URL;
@@ -104,6 +105,13 @@ export async function updateTicketStatus(ticketId: number, newStatus: string, cu
 
   await ticketRepo.update(ticketId, updateData)
   await ticketRepo.createHistory({ ticketId, userId: userData.id, action: 'status_change', newValue: `Status changed to ${newStatus}` })
+
+  // When a ticket is CLOSED, consume estimated hours from the client's wallet
+  if (newStatus === TS.CLOSED && t.clientId && t.estimatedHours) {
+    consumeWalletHours(t, userData).catch((err) => {
+      console.error(`${EMAIL_LOG_PREFIX} consumeWalletHours error for ticket #${ticketId}:`, err)
+    })
+  }
 
   // Send email notifications based on status change (fire-and-forget)
   if (newStatus === TS.RESOLVED && t.clientId) {
@@ -212,6 +220,52 @@ export async function resumeTimer(timeLogId: number, ticketId: number, descripti
   const newLog = await ticketRepo.createTimeLog({ ticketId, userId: userData.id, description, startTime: new Date(), isBillable: true })
   await ticketRepo.createHistory({ ticketId, userId: userData.id, action: 'timer_resumed', newValue: 'Timer resumed' })
   return newLog
+}
+
+// ─── Wallet Hour Consumption ─────────────────────────────────────────────
+
+/**
+ * Consume support hours from the client's wallet when a ticket is closed.
+ * Wallet is resolved through clientId (one wallet per client).
+ * Project/module context is preserved in the transaction metadata.
+ */
+async function consumeWalletHours(
+  ticket: {
+    id: number
+    clientId: string
+    projectId: number | null
+    moduleId: number | null
+    estimatedHours: number | null
+    consumedHours: number | null
+    ticketNumber: string
+    title: string
+  },
+  userData: { id: string; name: string },
+): Promise<void> {
+  const hoursToDeduct = ticket.consumedHours ?? ticket.estimatedHours ?? 0
+  if (hoursToDeduct <= 0) return
+
+  const result = await walletService.deductHoursFromWallet({
+    clientId: ticket.clientId,
+    hours: hoursToDeduct,
+    ticketId: ticket.id,
+    projectId: ticket.projectId,
+    moduleId: ticket.moduleId,
+    performedBy: userData.name || userData.id,
+    reason: `Ticket ${ticket.ticketNumber} closed — ${ticket.title}`,
+  })
+
+  if (result) {
+    console.log(
+      `[Wallet] Consumed ${hoursToDeduct}h from client ${ticket.clientId} wallet for ticket ${ticket.ticketNumber}. ` +
+      `Balance: ${result.previousBalance}h → ${result.newBalance}h`,
+    )
+
+    // Check for low balance after deduction
+    if (result.newBalance <= 20 && result.previousBalance > 20) {
+      console.log(`[Wallet] ⚠️ Low balance warning for client ${ticket.clientId}: ${result.newBalance}h remaining`)
+    }
+  }
 }
 
 // ─── Aggregated Page Data ─────────────────────────────────────────────────

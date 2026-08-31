@@ -13,9 +13,10 @@ export function walletLowTemplate(
 ): string {
   const content =
     emailHeading('Support Hours Running Low') +
-    emailParagraph(`Your support wallet for project <strong>${escapeHtml(data.projectName)}</strong> is running low on hours.`) +
+    emailParagraph(`Your support wallet is running low on hours.`) +
     emailFieldTable(
-      emailFieldRow('Project', escapeHtml(data.projectName)) +
+
+      emailFieldRow('Client', escapeHtml(data.clientName || data.projectName || 'Client')) +
       emailFieldRow('Remaining Hours', `${escapeHtml(data.remainingHours)}h`) +
       emailFieldRow('Threshold', `${escapeHtml(data.threshold)}h`),
     ) +
