@@ -104,6 +104,18 @@ async function sendEmailNotification(
 ): Promise<void> {
   const opts = { immediate: options?.immediate ?? false }
 
+  // ── Normalize ticket/wallet links to always use the configured FRONTEND_URL ──
+  // Prevents frontend-constructed localhost URLs from reaching email templates.
+  if (data.ticketLink) {
+    data.ticketLink = data.ticketLink.replace(/^https?:\/\/[^\/]+/, FRONTEND_URL)
+  }
+  if (data.feedbackLink) {
+    data.feedbackLink = data.feedbackLink.replace(/^https?:\/\/[^\/]+/, FRONTEND_URL)
+  }
+  if (data.walletLink) {
+    data.walletLink = data.walletLink.replace(/^https?:\/\/[^\/]+/, FRONTEND_URL)
+  }
+
   switch (eventType) {
     case 'ticket_created':
       sendTicketCreated(to, data, opts)

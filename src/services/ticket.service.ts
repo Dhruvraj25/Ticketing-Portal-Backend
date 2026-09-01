@@ -14,7 +14,7 @@ import { EMAIL_LOG_PREFIX } from './email/email.constants'
 import * as walletService from './wallet.service'
 
 /** Frontend portal URL used in email notification links. */
-const PORTAL_URL = process.env.FRONTEND_URL;
+const PORTAL_URL = process.env.FRONTEND_URL?.replace(/\/$/, '');
 
 if (!PORTAL_URL) {
   throw new Error('FRONTEND_URL is not configured');
