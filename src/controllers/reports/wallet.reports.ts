@@ -2,21 +2,23 @@ import { db } from '../../config/db'
 import { supportWallet, walletTransaction, project, ticket, module, user } from '../../models/schema'
 import { and, eq, desc, count, inArray, gte, lte, sum, sql } from 'drizzle-orm'
 import type { ReportFilters, ReportResult } from './types'
-import { getDateRange } from './utils'
+import { getDateRange, getClientScopeCondition } from './utils'
 
 /**
  * Get wallet IDs visible to the current user based on their role.
  * In the one-wallet-per-client architecture, each client has exactly one wallet.
- * Admins/Managers can filter by clientId.
+ * Clients see their organization's wallets; Admins/Managers can filter by clientId.
  */
 async function getVisibleWalletIds(currentUser: { id: string; role: string }, filters: ReportFilters): Promise<number[]> {
   const walletIds: Set<number> = new Set()
 
   if (currentUser.role === 'client') {
+    const scope = await getClientScopeCondition(currentUser.id)
+    const clientIds = scope?.clientIds || [currentUser.id]
     const wallets = await db
       .select({ id: supportWallet.id })
       .from(supportWallet)
-      .where(eq(supportWallet.clientId, currentUser.id))
+      .where(inArray(supportWallet.clientId, clientIds))
     wallets.forEach(w => walletIds.add(w.id))
   }
 
@@ -45,7 +47,10 @@ async function getVisibleWalletIds(currentUser: { id: string; role: string }, fi
  */
 export async function getSupportWalletReport(filters: ReportFilters, currentUser: { id: string; role: string }): Promise<ReportResult> {
   const conditions: any[] = []
-  if (currentUser.role === 'client') conditions.push(eq(supportWallet.clientId, currentUser.id))
+  if (currentUser.role === 'client') {
+    const scope = await getClientScopeCondition(currentUser.id)
+    if (scope) conditions.push(inArray(supportWallet.clientId, scope.clientIds))
+  }
   if (filters.clientId) conditions.push(eq(supportWallet.clientId, filters.clientId))
 
   const wallets = await db

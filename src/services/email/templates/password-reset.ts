@@ -15,7 +15,7 @@ export function passwordResetTemplate(
 
   const content =
     emailHeading('Reset Your Password') +
-    emailParagraph(`We received a request to reset the password for your SupportHub account associated with <strong>${escapeHtml(data.userEmail)}</strong>.`) +
+    emailParagraph(`We received a request to reset the password for your Support Hero account associated with <strong>${escapeHtml(data.userEmail)}</strong>.`) +
     emailParagraph(`Click the button below to reset your password. This link will expire in <strong>${escapeHtml(String(expiryMinutes))} minutes</strong>`) +
     emailButton('Reset Password', data.resetLink, branding) +
     emailSmallText('If you did not request a password reset, please ignore this email. Your password will remain unchanged.') +

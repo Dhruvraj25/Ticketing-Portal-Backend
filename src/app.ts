@@ -4,6 +4,8 @@ import cors from 'cors'
 import compression from 'compression'
 import { auth } from './config/auth'
 import { authRouter } from './routes/auth'
+import { usersRouter } from './routes/users'
+import { getFrontendUrl } from './utils/frontend-url'
 import { uploadRouter } from './routes/upload'
 import { ticketsRouter } from './routes/tickets'
 import { projectsRouter } from './routes/projects'
@@ -29,7 +31,7 @@ app.use('/api/bootstrap', bootstrapRouter)
 app.use(compression())
 
 app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+  origin: getFrontendUrl(),
   credentials: true,
 }))
 app.use(express.json({ limit: '10mb' }))
@@ -43,6 +45,7 @@ app.use('/api/auth', (req, res, next) => {
 
 // ─── API Routes (with timing) ────────────────────────────────────────────
 app.use('/api/upload', routeTimingMiddleware('Upload'), uploadRouter)
+app.use('/api/users', routeTimingMiddleware('Users'), usersRouter)
 app.use('/api/tickets', routeTimingMiddleware('Tickets'), ticketsRouter)
 app.use('/api/projects', routeTimingMiddleware('Projects'), projectsRouter)
 app.use('/api/modules', routeTimingMiddleware('Modules'), modulesRouter)

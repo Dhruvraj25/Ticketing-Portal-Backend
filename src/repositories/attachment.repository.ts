@@ -21,6 +21,21 @@ export async function findByTicketId(ticketId: number) {
     .orderBy(desc(attachment.createdAt))
 }
 
+export async function findById(id: number) {
+  const [row] = await db
+    .select({
+      id: attachment.id, ticketId: attachment.ticketId,
+      uploadedById: attachment.uploadedById, filename: attachment.filename,
+      url: attachment.url, publicId: attachment.publicId,
+      mimeType: attachment.mimeType, sizeBytes: attachment.sizeBytes,
+      createdAt: attachment.createdAt,
+    })
+    .from(attachment)
+    .where(eq(attachment.id, id))
+    .limit(1)
+  return row ?? null
+}
+
 export async function remove(id: number) {
   await db.delete(attachment).where(eq(attachment.id, id))
 }

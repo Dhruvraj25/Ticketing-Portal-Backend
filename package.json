@@ -8,7 +8,9 @@
     "start": "node dist/server.js",
     "migrate": "drizzle-kit push",
     "migrate:generate": "drizzle-kit generate",
-    "test:microsoft-smtp": "tsx test-microsoft-smtp.ts"
+    "test:microsoft-smtp": "tsx test-microsoft-smtp.ts",
+    "test": "node --import tsx --test \"tests/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@azure/identity": "^4.13.2",

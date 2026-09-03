@@ -80,6 +80,16 @@ export async function findAll() {
     .orderBy(desc(supportWallet.updatedAt))
 }
 
+/** Wallets belonging to any of the given client ids (tenant-scoped). */
+export async function findManyByClientIds(clientIds: string[]) {
+  if (clientIds.length === 0) return []
+  return db
+    .select(walletColumns)
+    .from(supportWallet)
+    .where(inArray(supportWallet.clientId, clientIds))
+    .orderBy(desc(supportWallet.updatedAt))
+}
+
 // ─── Create / Insert ───────────────────────────────────────────────────────
 
 /**

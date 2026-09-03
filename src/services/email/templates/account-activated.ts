@@ -13,11 +13,11 @@ export function accountActivatedTemplate(
 ): string {
   const content =
     emailHeading('Account Activated') +
-    emailParagraph(`Dear <strong>${escapeHtml(data.userName)}</strong>, your SupportHub account has been activated. You can now log in using the credentials you registered with.`) +
+    emailParagraph(`Dear <strong>${escapeHtml(data.userName)}</strong>, your Support Hero account has been activated. You can now log in using the credentials you registered with.`) +
     emailFieldTable(
       emailFieldRow('Email', escapeHtml(data.userEmail)),
     ) +
-    emailParagraph('Click the button below to log in and access the SupportHub portal.') +
+    emailParagraph('Click the button below to log in and access the Support Hero portal.') +
     emailButton('Log In', data.loginUrl, branding)
 
   return baseWrapper(content, branding)

@@ -19,7 +19,7 @@ export function customerCreatedTemplate(
       emailFieldRow('Email', escapeHtml(data.customerEmail)) +
       (data.projectName ? emailFieldRow('Project', escapeHtml(data.projectName)) : ''),
     ) +
-    emailParagraph('You can now log in to the SupportHub portal to track your tickets, review estimates, and manage your support requests.') +
+    emailParagraph('You can now log in to the Support Hero portal to track your tickets, review estimates, and manage your support requests.') +
     emailButton('Go to Portal', data.portalUrl, branding)
 
   return baseWrapper(content, branding)

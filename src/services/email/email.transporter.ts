@@ -15,7 +15,7 @@
 //   RESEND_API_KEY     — Resend API key (re_...) — required for resend provider
 //   EMAIL_FROM         — sender email address (e.g., support@infinixotech.com)
 //   EMAIL_FROM_ADDRESS — legacy alias for EMAIL_FROM
-//   EMAIL_FROM_NAME    — display name for the sender (e.g., SupportHub)
+//   EMAIL_FROM_NAME    — display name for the sender (e.g., Support Hero)
 //
 // Missing email configuration never prevents the application from starting —
 // the client simply stays uninitialized and emails are logged instead of sent.

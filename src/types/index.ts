@@ -1,10 +1,17 @@
 export type UserRole = 'client' | 'developer' | 'project_manager' | 'admin'
 
+/**
+ * Client tenant types. Each client organization/account has exactly one
+ * Client Approver and multiple Standard Client users.
+ */
+export type ClientType = 'approver' | 'standard'
+
 // ============================================================================
 // Centralized TicketStatus Enum — used across backend, frontend, APIs, and DB
 // ============================================================================
 
 export const TicketStatus = {
+  DRAFT: 'draft',
   NEW: 'new',
   MANAGER_REVIEW: 'manager_review',
   ESTIMATE_PENDING: 'estimate_pending',
@@ -15,6 +22,9 @@ export const TicketStatus = {
   CLIENT_REVIEW: 'client_review',
   CLOSED: 'closed',
   REQUEST_FOR_REVISION: 'request_for_revision',
+  // Manager-initiated internal rework — a SEPARATE state from
+  // REQUEST_FOR_REVISION (which is client-initiated).
+  REWORK: 'rework',
 } as const
 
 export type TicketStatus = (typeof TicketStatus)[keyof typeof TicketStatus]
@@ -135,6 +145,7 @@ export interface ManagerStats {
 }
 
 export const TICKET_STATUS_CONFIG: Record<TicketStatus, { label: string; color: string }> = {
+  [TicketStatus.DRAFT]: { label: 'Draft', color: 'bg-gray-50 text-gray-500 border-gray-200' },
   [TicketStatus.NEW]: { label: 'New Request', color: 'bg-blue-50 text-blue-600 border-blue-200' },
   [TicketStatus.MANAGER_REVIEW]: { label: 'Under Review', color: 'bg-indigo-50 text-indigo-600 border-indigo-200' },
   [TicketStatus.ESTIMATE_PENDING]: { label: 'Awaiting Estimate Approval', color: 'bg-sky-50 text-sky-600 border-sky-200' },
@@ -145,6 +156,7 @@ export const TICKET_STATUS_CONFIG: Record<TicketStatus, { label: string; color: 
   [TicketStatus.CLIENT_REVIEW]: { label: 'Awaiting Client Review', color: 'bg-sky-50 text-sky-600 border-sky-200' },
   [TicketStatus.CLOSED]: { label: 'Completed', color: 'bg-gray-50 text-gray-500 border-gray-200' },
   [TicketStatus.REQUEST_FOR_REVISION]: { label: 'Revision Requested', color: 'bg-orange-50 text-orange-600 border-orange-200' },
+  [TicketStatus.REWORK]: { label: 'Rework', color: 'bg-purple-50 text-purple-600 border-purple-200' },
 }
 
 export const TICKET_PRIORITY_CONFIG: Record<TicketPriority, { label: string; color: string }> = {

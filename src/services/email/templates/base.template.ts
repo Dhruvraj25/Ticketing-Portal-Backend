@@ -29,10 +29,13 @@ export interface BrandingConfig {
 }
 
 const DEFAULT_BRANDING: BrandingConfig = {
-  companyName: 'SupportHub',
+  companyName: 'Support Hero',
   primaryColor: '#2563EB',
   secondaryColor: '#6366F1',
-  portalUrl: 'https://supporthub.app',
+  // No hardcoded portal domain — the frontend URL is env-configured
+  // (FRONTEND_URL) and passed per-email; the footer link is only rendered
+  // when a portalUrl is actually configured.
+  portalUrl: '',
 }
 
 // ─── HTML Escaping (Security) ───────────────────────────────────────────────
@@ -156,7 +159,7 @@ export function baseWrapper(content: string, branding?: BrandingConfig): string 
     <tr>
       <td style="padding:24px 16px 0;text-align:center" class="email-footer">
         <p style="margin:0 0 8px;font-size:13px;line-height:20px;color:#9ca3af">
-          ${escapeHtml(brand.companyName)} &mdash; SupportHub Portal
+          ${escapeHtml(brand.companyName)} &mdash; Support Hero Portal
         </p>
         <p style="margin:0;font-size:12px;line-height:18px;color:#d1d5db">
           This is an automated notification. Please do not reply to this email.

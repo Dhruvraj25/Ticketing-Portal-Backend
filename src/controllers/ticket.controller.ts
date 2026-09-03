@@ -1,6 +1,5 @@
 import * as ticketService from '../services/ticket.service'
 import { wrapController } from '../lib/performance-profiler'
-import { requireAuth } from '../middleware/auth'
 import type { AuthenticatedUser } from '../services/user.service'
 
 export const createTicket = wrapController('createTicket', async (data: any, currentUser: AuthenticatedUser) =>
@@ -15,6 +14,15 @@ export const getTicketById = wrapController('getTicketById', async (ticketId: nu
 export const updateTicketStatus = wrapController('updateTicketStatus', async (ticketId: number, newStatus: string, currentUser: AuthenticatedUser) =>
   ticketService.updateTicketStatus(ticketId, newStatus, currentUser))
 
+export const updateTicket = wrapController('updateTicket', async (ticketId: number, data: any, currentUser: AuthenticatedUser) =>
+  ticketService.updateTicket(ticketId, data, currentUser))
+
+export const changeTicketPriority = wrapController('changeTicketPriority', async (ticketId: number, priority: string, currentUser: AuthenticatedUser) =>
+  ticketService.changePriority(ticketId, priority, currentUser))
+
+export const changeTicketDates = wrapController('changeTicketDates', async (ticketId: number, data: { createdAt?: string; closedAt?: string }, currentUser: AuthenticatedUser) =>
+  ticketService.changeTicketDates(ticketId, data, currentUser))
+
 export const assignTicket = wrapController('assignTicket', async (ticketId: number, developerId: string, currentUser: AuthenticatedUser) =>
   ticketService.assignTicket(ticketId, developerId, currentUser))
 
@@ -24,8 +32,8 @@ export const addComment = wrapController('addComment', async (ticketId: number, 
 export const getComments = wrapController('getComments', async (ticketId: number, currentUser: AuthenticatedUser) =>
   ticketService.getComments(ticketId, currentUser))
 
-export const getTicketHistory = wrapController('getTicketHistory', async (ticketId: number) =>
-  ticketService.getTicketHistory(ticketId))
+export const getTicketHistory = wrapController('getTicketHistory', async (ticketId: number, currentUser: AuthenticatedUser) =>
+  ticketService.getTicketHistory(ticketId, currentUser))
 
 export const startTimer = wrapController('startTimer', async (ticketId: number, description: string | undefined, currentUser: AuthenticatedUser) =>
   ticketService.startTimer(ticketId, description, currentUser))

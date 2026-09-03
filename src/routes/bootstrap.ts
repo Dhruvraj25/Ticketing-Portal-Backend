@@ -3,7 +3,8 @@ import express from 'express'
 import { auth } from '../config/auth'
 import { db } from '../config/db'
 import { user } from '../models/schema'
-import { eq } from 'drizzle-orm'
+import { eq, sql } from 'drizzle-orm'
+import { normalizeEmail } from '../utils/email'
 
 const router = Router()
 
@@ -26,11 +27,11 @@ router.post('/create-admin', async (req, res) => {
       })
     }
 
-    // Prevent creating duplicate admin
+    // Prevent creating duplicate admin (case-insensitive email identity)
     const existing = await db
       .select()
       .from(user)
-      .where(eq(user.email, email))
+      .where(sql`LOWER(${user.email}) = ${normalizeEmail(email)}`)
       .limit(1)
 
     if (existing.length > 0) {
@@ -39,11 +40,14 @@ router.post('/create-admin', async (req, res) => {
       })
     }
 
+    // Normalize email casing before creating the account
+    const normalizedEmail = normalizeEmail(email)
+
     // Let Better Auth create BOTH user and password account
     const result = await auth.api.signUpEmail({
       body: {
         name,
-        email,
+        email: normalizedEmail,
         password,
       },
     })

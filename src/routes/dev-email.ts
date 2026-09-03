@@ -1,11 +1,13 @@
 import { Router } from "express";
 import { sendWelcomeEmail } from "../services/email/email.service";
+import { getFrontendUrl } from "../utils/frontend-url";
 
 // DEV-ONLY route. This is a manual email-testing utility — it is NOT part of
 // the notification pipeline and must never be reachable in production.
-// Business events never call EmailService directly; they go through the
-// unified Notification Dispatcher (Frontend lib/notify-all.ts → this backend
-// bridge). See docs/NOTIFICATION_REFACTOR_REPORT.md.
+// Business events never call EmailService directly; backend-originated events
+// go through the unified Notification Dispatcher
+// (src/lib/notification-dispatcher.ts) and frontend-originated events come
+// through this backend bridge (routes/email-notification.ts).
 
 const router = Router();
 
@@ -15,11 +17,7 @@ router.post("/test-email", async (req, res) => {
   if (process.env.NODE_ENV === "production") {
     return res.status(404).json({ error: "Not found" });
   }
-const portalUrl = process.env.FRONTEND_URL;
-
-if (!portalUrl) {
-  throw new Error("FRONTEND_URL is not configured");
-}
+const portalUrl = getFrontendUrl();
   try {
     sendWelcomeEmail(
       "support@infinixotech.com",

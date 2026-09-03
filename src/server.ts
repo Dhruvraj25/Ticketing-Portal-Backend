@@ -71,11 +71,11 @@ async function startServer() {
 
   app.listen(PORT, '0.0.0.0', function () {
     console.log(
-  '[SupportHub] Backend server running on port ' + PORT
+  '[Support Hero] Backend server running on port ' + PORT
 )
 
     console.log(
-      '[SupportHub] Environment: ' +
+      '[Support Hero] Environment: ' +
         (process.env.NODE_ENV || 'development')
     )
   })
@@ -84,6 +84,6 @@ async function startServer() {
 // ─── Start Server ─────────────────────────────────────────────────────────
 
 startServer().catch(function (err) {
-  console.error('[SupportHub] Failed to start server:', err)
+  console.error('[Support Hero] Failed to start server:', err)
   process.exit(1)
 })

@@ -11,6 +11,15 @@ export const user = pgTable('user', {
   avatarUrl: text('avatarUrl'),
   role: text('role').notNull().default('client'),
   banned: boolean('banned').notNull().default(false),
+  // User profile
+  about: text('about'),
+  timezone: text('timezone'),
+  // Client tenant model: each client organization/account has one Client
+  // Approver and multiple Standard Client users. accountId groups users of the
+  // same organization; clientType marks approver vs standard. Internal staff
+  // (developer/project_manager/admin) have no accountId/clientType.
+  accountId: text('accountId'),
+  clientType: text('clientType'),
   // Customer-level preference: whether this customer's users receive Microsoft
   // Teams notifications. Default OFF. Set during onboarding; editable in Admin UI.
   enableTeamsNotifications: boolean('enable_teams_notifications').notNull().default(false),
@@ -113,6 +122,7 @@ export const ticket = pgTable('ticket', {
   ticketNumber: text('ticketNumber').notNull().unique(),
   title: text('title').notNull(),
   description: text('description').notNull(),
+  type: text('type').notNull().default('general'),
   status: text('status').notNull().default('open'),
   priority: text('priority').notNull().default('medium'),
   category: text('category').notNull().default('general'),
@@ -251,11 +261,32 @@ export const notification = pgTable('notification', {
   userCreatedIdx: index('notification_user_created_idx').on(table.userId, table.createdAt),
 }))
 
+// --- Notification Preferences ----------------------------------------------
+// Requirement #14: one preference row per (user, channel, eventType). Absent
+// rows mean "use the default" (defaults preserve current behavior — see
+// src/lib/notification-preferences.ts), so only explicit user choices are
+// persisted. Channels: in_app | email | teams.
+
+export const notificationPreference = pgTable('notification_preferences', {
+  id: serial('id').primaryKey(),
+  userId: text('userId')
+    .notNull()
+    .references(() => user.id, { onDelete: 'cascade' }),
+  channel: text('channel').notNull(),
+  eventType: text('eventType').notNull(),
+  enabled: boolean('enabled').notNull().default(true),
+  createdAt: timestamp('createdAt').notNull().defaultNow(),
+  updatedAt: timestamp('updatedAt').notNull().defaultNow(),
+}, (table) => ({
+  userChannelEventIdx: uniqueIndex('notification_pref_user_channel_event_idx').on(table.userId, table.channel, table.eventType),
+  userIdIdx: index('notification_pref_user_idx').on(table.userId),
+}))
+
 // --- Branding Table -------------------------------------------------------
 export const branding = pgTable('branding', {
   id: serial('id').primaryKey(),
   companyId: text('companyId').notNull().default('default'),
-  companyName: text('companyName').notNull().default('SupportHub'),
+  companyName: text('companyName').notNull().default('Support Hero'),
   logoUrl: text('logoUrl'),
   logoPublicId: text('logoPublicId'),
   faviconUrl: text('faviconUrl'),
@@ -474,4 +505,5 @@ export const userRelations = relations(user, ({ many }) => ({
   projectDevelopments: many(projectDeveloper),
   projectClients: many(projectClient),
   wallets: many(supportWallet),
+  notificationPreferences: many(notificationPreference),
 }))

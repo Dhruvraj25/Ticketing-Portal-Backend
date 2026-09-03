@@ -3,12 +3,19 @@ import { ticket, timeLog } from '../../models/schema'
 import { and, eq, desc, lte, gte, count, isNotNull, sql, inArray } from 'drizzle-orm'
 import { TicketStatus as TS, TICKET_STATUS_CONFIG } from '../../types/index'
 import type { ReportFilters, ReportResult } from './types'
-import { getDateRange } from './utils'
+import { getDateRange, getClientScopeCondition } from './utils'
+
+async function applyClientScope(conditions: any[], currentUser: { id: string; role: string }) {
+  if (currentUser.role === 'client') {
+    const scope = await getClientScopeCondition(currentUser.id)
+    if (scope) conditions.push(inArray(ticket.clientId, scope.clientIds))
+  }
+}
 
 export async function getTicketSummaryReport(filters: ReportFilters, currentUser: { id: string; role: string }): Promise<ReportResult> {
   const { since, until } = getDateRange(filters.dateFrom, filters.dateTo)
   const conditions: any[] = [gte(ticket.createdAt, since), lte(ticket.createdAt, until)]
-  if (currentUser.role === 'client') conditions.push(eq(ticket.clientId, currentUser.id))
+  await applyClientScope(conditions, currentUser)
   if (currentUser.role === 'developer') conditions.push(eq(ticket.assignedToId, currentUser.id))
   if (filters.projectId) conditions.push(eq(ticket.projectId, filters.projectId))
   if (filters.moduleId) conditions.push(eq(ticket.moduleId, filters.moduleId))
@@ -63,7 +70,7 @@ export async function getTicketSummaryReport(filters: ReportFilters, currentUser
 export async function getTicketStatusReport(filters: ReportFilters, currentUser: { id: string; role: string }): Promise<ReportResult> {
   const { since, until } = getDateRange(filters.dateFrom, filters.dateTo)
   const conditions: any[] = [gte(ticket.createdAt, since), lte(ticket.createdAt, until)]
-  if (currentUser.role === 'client') conditions.push(eq(ticket.clientId, currentUser.id))
+  await applyClientScope(conditions, currentUser)
   if (currentUser.role === 'developer') conditions.push(eq(ticket.assignedToId, currentUser.id))
   if (filters.projectId) conditions.push(eq(ticket.projectId, filters.projectId))
   if (filters.developerId) conditions.push(eq(ticket.assignedToId, filters.developerId))
@@ -98,7 +105,7 @@ export async function getTicketStatusReport(filters: ReportFilters, currentUser:
 
 export async function getTicketAgingReport(filters: ReportFilters, currentUser: { id: string; role: string }): Promise<ReportResult> {
   const conditions: any[] = [sql`${ticket.status} NOT IN (${TS.CLOSED})`]
-  if (currentUser.role === 'client') conditions.push(eq(ticket.clientId, currentUser.id))
+  await applyClientScope(conditions, currentUser)
   if (currentUser.role === 'developer') conditions.push(eq(ticket.assignedToId, currentUser.id))
   if (filters.projectId) conditions.push(eq(ticket.projectId, filters.projectId))
 
@@ -133,7 +140,7 @@ export async function getTicketAgingReport(filters: ReportFilters, currentUser: 
 
 export async function getTicketResolutionReport(filters: ReportFilters, currentUser: { id: string; role: string }): Promise<ReportResult> {
   const conditions: any[] = [isNotNull(ticket.resolvedAt)]
-  if (currentUser.role === 'client') conditions.push(eq(ticket.clientId, currentUser.id))
+  await applyClientScope(conditions, currentUser)
   if (currentUser.role === 'developer') conditions.push(eq(ticket.assignedToId, currentUser.id))
   if (filters.projectId) conditions.push(eq(ticket.projectId, filters.projectId))
   if (filters.developerId) conditions.push(eq(ticket.assignedToId, filters.developerId))

@@ -17,36 +17,68 @@ import { getQueueStats, getQueueEntries, clearQueue } from '../services/teams/te
 import { teamsMonitor } from '../services/teams/teams-monitor'
 import { teamsConfigValidator } from '../services/teams/teams-config-validator'
 import type { TeamsNotificationPayload } from '../services/teams/teams.types'
+import { getFrontendUrl } from '../utils/frontend-url'
 
 const router = Router()
 
-// ─── Send Notification ─────────────────────────────────────────────────────
+/** Only internal staff (admins / project managers) may reach Teams admin endpoints. */
+function requireInternalStaff(req: AuthenticatedRequest, res: Response, next: any) {
+  const role = req.user?.role
+  if (role !== 'admin' && role !== 'project_manager') {
+    return res.status(403).json({ error: 'Access denied' })
+  }
+  next()
+}
 
-router.post('/notification', async (req: AuthenticatedRequest, res: Response) => {
+// ─── Send Notification ─────────────────────────────────────────────────────
+// Requires an authenticated user (the frontend server action sends the session
+// cookie). Recipient preferences are enforced server-side below.
+
+router.post('/notification', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { eventType, payload } = req.body
     if (!eventType || !payload) {
       return res.status(400).json({ error: 'Missing required fields: eventType, payload' })
     }
 
-    // Respect the customer preference (defense-in-depth; the frontend also gates).
-    // In-app and email notifications are unaffected — only Teams is skipped.
-    const recipientUserId = (payload as TeamsNotificationPayload).recipientUserId
-    if (recipientUserId) {
+    // Requirement #14 — enforce the recipient's per-event Teams preference
+    // server-side (the frontend is never trusted to enforce preferences).
+    // The Teams default for client users is the customer-level
+    // enable_teams_notifications flag; internal staff default to enabled.
+    // Only messages addressed to a known recipient are gated — broadcast
+    // channel messages without a recipient pass through.
+    const teamsPayload = payload as TeamsNotificationPayload
+    const recipientUserId = teamsPayload.recipientUserId
+    const recipientEmail = teamsPayload.recipientEmail
+    if (recipientUserId || recipientEmail) {
       try {
         const { db } = await import('../config/db')
         const { user } = await import('../models/schema')
-        const { eq } = await import('drizzle-orm')
-        const [recipient] = await db
-          .select({ role: user.role, enableTeamsNotifications: user.enableTeamsNotifications })
-          .from(user)
-          .where(eq(user.id, recipientUserId))
-          .limit(1)
-        // Only customers (client accounts) are governed by the preference —
-        // internal staff notifications always flow to Teams.
-        if (recipient && recipient.role === 'client' && !recipient.enableTeamsNotifications) {
-          console.log(TEAMS_LOG_PREFIX + ' Skipped notification for ' + recipientUserId + ' (customer Teams notifications disabled)')
-          return res.json({ success: true, message: 'Teams notification skipped (customer preference)', skipped: true })
+        const { eq, sql } = await import('drizzle-orm')
+        const { canonicalNotificationEvent, isNotificationEnabled, indexPreferences } = await import('../lib/notification-preferences')
+        const prefRepoModule = await import('../repositories/notification-preference.repository')
+        const { normalizeEmail } = await import('../utils/email')
+
+        const [recipient] = recipientUserId
+          ? await db.select({ id: user.id, role: user.role, enableTeamsNotifications: user.enableTeamsNotifications })
+            .from(user).where(eq(user.id, recipientUserId)).limit(1)
+          : await db.select({ id: user.id, role: user.role, enableTeamsNotifications: user.enableTeamsNotifications })
+            .from(user).where(sql`LOWER(${user.email}) = ${normalizeEmail(recipientEmail || '')}`).limit(1)
+
+        if (recipient) {
+          const canonical = canonicalNotificationEvent(eventType)
+          const rows = canonical
+            ? (await prefRepoModule.findByUserId(recipient.id))
+            : []
+          const indexed = indexPreferences(rows)
+          const enabled = isNotificationEnabled(indexed, 'teams', canonical || eventType, {
+            role: recipient.role,
+            enableTeamsNotifications: recipient.enableTeamsNotifications ?? false,
+          })
+          if (!enabled) {
+            console.log(TEAMS_LOG_PREFIX + ' Skipped notification for ' + recipient.id + ' (Teams preference disabled for event: ' + eventType + ')')
+            return res.json({ success: true, message: 'Teams notification skipped (recipient preference)', skipped: true })
+          }
         }
       } catch (dbErr) {
         // Fail-open: if the preference lookup fails, let the webhook attempt proceed.
@@ -65,18 +97,18 @@ router.post('/notification', async (req: AuthenticatedRequest, res: Response) =>
 
 // ─── Test Message ──────────────────────────────────────────────────────────
 
-router.post('/test', async (_req: AuthenticatedRequest | any, res: Response) => {
+router.post('/test', requireAuth, requireInternalStaff, async (_req: AuthenticatedRequest | any, res: Response) => {
   try {
     const config = loadTeamsConfig()
     const testPayload: TeamsNotificationPayload = {
       id: 'test_' + Date.now().toString(36),
       eventType: 'test_message',
       title: 'Teams Integration Test',
-      message: 'This is a test message from SupportHub.',
+      message: 'This is a test message from Support Hero.',
       projectName: 'Test Project',
       ticketId: '#TEST-001',
       priority: 'Low',
-      url: process.env.FRONTEND_URL || 'http://localhost:3000',
+      url: getFrontendUrl(),
       color: 'info',
       fields: [
         { label: 'Test Type', value: 'Connectivity Test' },
@@ -147,7 +179,7 @@ router.post('/test', async (_req: AuthenticatedRequest | any, res: Response) => 
 
 // ─── Status / Health ───────────────────────────────────────────────────────
 
-router.get('/status', (_req: AuthenticatedRequest | any, res: Response) => {
+router.get('/status', requireAuth, requireInternalStaff, (_req: AuthenticatedRequest | any, res: Response) => {
   const config = loadTeamsConfig()
   const webhookStatus = getWebhookStatus()
   const qStats = getQueueStats()
@@ -164,7 +196,7 @@ router.get('/status', (_req: AuthenticatedRequest | any, res: Response) => {
 
 // ─── Configuration Validation ──────────────────────────────────────────────
 
-router.get('/config/validate', (_req: AuthenticatedRequest | any, res: Response) => {
+router.get('/config/validate', requireAuth, requireInternalStaff, (_req: AuthenticatedRequest | any, res: Response) => {
   const config = loadTeamsConfig()
   const validation = teamsConfigValidator.validateConfig(config)
   return res.json(validation)
@@ -172,7 +204,7 @@ router.get('/config/validate', (_req: AuthenticatedRequest | any, res: Response)
 
 // ─── Queue Status ──────────────────────────────────────────────────────────
 
-router.get('/queue', (_req: AuthenticatedRequest | any, res: Response) => {
+router.get('/queue', requireAuth, requireInternalStaff, (_req: AuthenticatedRequest | any, res: Response) => {
   const qStats = getQueueStats()
   const entries = getQueueEntries()
 
@@ -193,14 +225,14 @@ router.get('/queue', (_req: AuthenticatedRequest | any, res: Response) => {
 
 // ─── Clear Queue ───────────────────────────────────────────────────────────
 
-router.post('/queue/clear', (_req: AuthenticatedRequest | any, res: Response) => {
+router.post('/queue/clear', requireAuth, requireInternalStaff, (_req: AuthenticatedRequest | any, res: Response) => {
   clearQueue()
   return res.json({ success: true, message: 'Queue cleared' })
 })
 
 // ─── Monitor Events ────────────────────────────────────────────────────────
 
-router.get('/monitor', (_req: AuthenticatedRequest | any, res: Response) => {
+router.get('/monitor', requireAuth, requireInternalStaff, (_req: AuthenticatedRequest | any, res: Response) => {
   const events = teamsMonitor.getRecentEvents(100)
   const stats = teamsMonitor.getStats()
 
@@ -213,7 +245,7 @@ router.get('/monitor', (_req: AuthenticatedRequest | any, res: Response) => {
 
 // ─── Reset Monitor Stats ───────────────────────────────────────────────────
 
-router.post('/monitor/reset', (_req: AuthenticatedRequest | any, res: Response) => {
+router.post('/monitor/reset', requireAuth, requireInternalStaff, (_req: AuthenticatedRequest | any, res: Response) => {
   teamsMonitor.resetStats()
   return res.json({ success: true, message: 'Monitor stats reset' })
 })

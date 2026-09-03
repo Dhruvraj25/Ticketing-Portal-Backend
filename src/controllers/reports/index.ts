@@ -10,6 +10,7 @@ import * as developerReports from './developer.reports'
 import * as projectReports from './project.reports'
 import * as slaReports from './sla.reports'
 import * as walletReports from './wallet.reports'
+import { getActualVsEstimatedReport } from './actual-vs-estimated.reports'
 
 type ReportFn = (filters: ReportFilters, currentUser: { id: string; role: string }) => Promise<ReportResult>
 
@@ -43,6 +44,9 @@ const reportRegistry: Record<string, ReportFn> = {
   wallet_transaction: walletReports.getWalletTransactionReport,
   wallet_consumption: walletReports.getWalletConsumptionReport,
   wallet_history: walletReports.getWalletHistoryReport,
+
+  // Time tracking
+  actual_vs_estimated: getActualVsEstimatedReport,
 }
 
 /** Main report orchestrator: validates access, delegates to the correct report function. */
@@ -67,7 +71,16 @@ export const getReportFormData = wrapController('getReportFormData',
     const { eq, inArray } = await import('drizzle-orm')
 
     const projects = currentUser.role === 'client'
-      ? await db.select({ id: project.id, name: project.projectName }).from(project).where(eq(project.clientId, currentUser.id))
+      ? await (async () => {
+          const { getClientScopeCondition } = await import('./utils')
+          const scope = await getClientScopeCondition(currentUser.id)
+          const clientIds = scope?.clientIds || [currentUser.id]
+          const { inArray } = await import('drizzle-orm')
+          return db
+            .select({ id: project.id, name: project.projectName })
+            .from(project)
+            .where(inArray(project.clientId, clientIds))
+        })()
       : await db.select({ id: project.id, name: project.projectName }).from(project)
 
     const developers = await db.select({ id: user.id, name: user.name }).from(user).where(eq(user.role, 'developer'))

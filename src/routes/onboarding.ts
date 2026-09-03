@@ -5,7 +5,21 @@ import type { AuthenticatedRequest } from '../middleware/auth'
 const router = Router()
 export const onboardingRouter = router
 
-router.get('/clients', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+/**
+ * Privacy guard: the onboarding directory endpoints enumerate portal users
+ * (all client accounts, all managers, onboarding history). Only internal
+ * staff may call them — a client must never be able to list users of other
+ * organizations (Requirement #5 tenant isolation).
+ */
+function requireInternalStaff(req: AuthenticatedRequest, res: Response, next: any) {
+  const role = req.user?.role
+  if (role !== 'admin' && role !== 'project_manager') {
+    return res.status(403).json({ error: 'Access denied' })
+  }
+  next()
+}
+
+router.get('/clients', requireAuth, requireInternalStaff, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { db } = await import('../config/db')
     const { user } = await import('../models/schema')
@@ -15,7 +29,7 @@ router.get('/clients', requireAuth, async (req: AuthenticatedRequest, res: Respo
   } catch (err: any) { return res.status(400).json({ error: err.message }) }
 })
 
-router.get('/managers', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/managers', requireAuth, requireInternalStaff, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { db } = await import('../config/db')
     const { user } = await import('../models/schema')
@@ -52,14 +66,16 @@ router.post('/check-duplicate-email', requireAuth, async (req: AuthenticatedRequ
   try {
     const { db } = await import('../config/db')
     const { user } = await import('../models/schema')
-    const { eq } = await import('drizzle-orm')
+    const { sql } = await import('drizzle-orm')
+    const { normalizeEmail } = await import('../utils/email')
     const { email } = req.body
-    const [existing] = await db.select({ id: user.id }).from(user).where(eq(user.email, email?.trim())).limit(1)
+    // Case-insensitive duplicate check: User@Company.com === user@company.com
+    const [existing] = await db.select({ id: user.id }).from(user).where(sql`LOWER(${user.email}) = ${normalizeEmail(email)}`).limit(1)
     return res.json({ isDuplicate: !!existing })
   } catch (err: any) { return res.status(400).json({ error: err.message }) }
 })
 
-router.get('/history', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+router.get('/history', requireAuth, requireInternalStaff, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { db } = await import('../config/db')
     const { ticketHistory, user } = await import('../models/schema')

@@ -1,6 +1,13 @@
 import pg from 'pg'
 
-const DATABASE_URL = 'postgresql://neondb_owner:npg_06TeuIUgVLXM@ep-sweet-river-aqhwknkv-pooler.c-8.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require'
+// SECURITY: the database URL must come from the environment — never hard-code
+// a production credential in source. Run with DATABASE_URL set, e.g.:
+//   DATABASE_URL="$(cat .env.local | grep DATABASE_URL | cut -d= -f2-)" node apply-migration.mjs
+const DATABASE_URL = process.env.DATABASE_URL
+if (!DATABASE_URL) {
+  console.error('DATABASE_URL is not set — refusing to run without a database URL.')
+  process.exit(1)
+}
 
 const pool = new pg.Pool({ connectionString: DATABASE_URL })
 

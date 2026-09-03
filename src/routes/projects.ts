@@ -56,3 +56,15 @@ router.post('/:id/archive', requireAuth, async (req: AuthenticatedRequest, res: 
   }
 })
 
+// ─── Reassignment (Client / Manager) ─────────────────────────────────────
+router.post('/:id/reassign', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { reassignProject } = await import('../controllers/project.controller')
+    const result = await reassignProject(parseInt(req.params.id as string), req.body, req.user!)
+    return res.json(result)
+  } catch (err: any) {
+    const status = err.statusCode && Number(err.statusCode) >= 400 && Number(err.statusCode) < 500 ? Number(err.statusCode) : 400
+    return res.status(status).json({ error: err.message })
+  }
+})
+

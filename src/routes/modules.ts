@@ -23,7 +23,8 @@ router.get('/:id', requireAuth, async (req: AuthenticatedRequest, res: Response)
     const result = await getModuleById(parseInt(req.params.id as string), req.user!)
     return res.json(result)
   } catch (err: any) {
-    return res.status(400).json({ error: err.message })
+    const status = err.statusCode && Number(err.statusCode) >= 400 && Number(err.statusCode) < 500 ? Number(err.statusCode) : 400
+    return res.status(status).json({ error: err.message })
   }
 })
 
@@ -33,7 +34,8 @@ router.post('/', requireAuth, async (req: AuthenticatedRequest, res: Response) =
     const result = await createModule(req.body, req.user!)
     return res.json(result)
   } catch (err: any) {
-    return res.status(400).json({ error: err.message })
+    const status = err.statusCode && Number(err.statusCode) >= 400 && Number(err.statusCode) < 500 ? Number(err.statusCode) : 400
+    return res.status(status).json({ error: err.message })
   }
 })
 
@@ -43,7 +45,8 @@ router.patch('/:id', requireAuth, async (req: AuthenticatedRequest, res: Respons
     const result = await updateModule(parseInt(req.params.id as string), req.body, req.user!)
     return res.json(result)
   } catch (err: any) {
-    return res.status(400).json({ error: err.message })
+    const status = err.statusCode && Number(err.statusCode) >= 400 && Number(err.statusCode) < 500 ? Number(err.statusCode) : 400
+    return res.status(status).json({ error: err.message })
   }
 })
 
@@ -53,7 +56,8 @@ router.delete('/:id', requireAuth, async (req: AuthenticatedRequest, res: Respon
     await deleteModule(parseInt(req.params.id as string), req.user!)
     return res.json({ success: true })
   } catch (err: any) {
-    return res.status(400).json({ error: err.message })
+    const status = err.statusCode && Number(err.statusCode) >= 400 && Number(err.statusCode) < 500 ? Number(err.statusCode) : 400
+    return res.status(status).json({ error: err.message })
   }
 })
 

@@ -48,16 +48,27 @@ import {
   sendLoginCredentials,
 } from '../services/email/email.service'
 import { EMAIL_LOG_PREFIX } from '../services/email/email.constants'
+import { getFrontendUrl } from '../utils/frontend-url'
+import { indexPreferences } from '../lib/notification-preferences'
 
 const router = Router()
 
-const FRONTEND_URL = process.env.FRONTEND_URL?.replace(/\/$/, '')
-
-if (!FRONTEND_URL) {
-  throw new Error('FRONTEND_URL is not configured')
-}
+const FRONTEND_URL = getFrontendUrl()
 
 const LOGIN_URL = `${FRONTEND_URL}/sign-in`
+
+// ─── Idempotency ──────────────────────────────────────────────────────────
+// Prevents duplicate emails caused by retries or duplicate API submissions
+// (e.g. the same approval action POSTed twice). Every DISTINCT approval/event
+// carries its own key (or none) and is always sent — only exact repeats within
+// the window are suppressed.
+import { createWindowDedupe } from '../utils/window-dedupe'
+const EMAIL_DEDUPE_WINDOW_MS = 5 * 60 * 1000 // 5 minutes
+const emailDedupe = createWindowDedupe(EMAIL_DEDUPE_WINDOW_MS)
+
+function isDuplicateSubmission(key: string | undefined): boolean {
+  return emailDedupe.isDuplicate(key)
+}
 /**
  * POST /api/email/notification
  *
@@ -72,15 +83,30 @@ const LOGIN_URL = `${FRONTEND_URL}/sign-in`
  *   immediate?: boolean
  * }
  */
-router.post('/notification', async (req: AuthenticatedRequest, res: Response) => {
+router.post('/notification', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
-    const { eventType, to, data, immediate } = req.body
+    const { eventType, to, data, immediate, idempotencyKey } = req.body
     if (!eventType || !to || !data) {
       return res.status(400).json({ error: 'Missing required fields: eventType, to, data' })
     }
 
+    // Suppress exact duplicate submissions (retries) — every distinct event
+    // passes through because it carries a distinct key or none at all. The
+    // caller supplies an idempotencyKey per distinct approval/action cycle.
+    if (isDuplicateSubmission(idempotencyKey)) {
+      return res.json({ success: true, message: 'Duplicate email submission suppressed', deduplicated: true })
+    }
+
+    // Requirement #14 — enforce per-event Email preferences server-side. The
+    // frontend is never trusted to enforce preferences: recipients who have
+    // explicitly disabled this event on the Email channel are dropped here.
+    const sendTo = await filterByEmailPreferences(to, eventType)
+    if (sendTo.length === 0) {
+      return res.json({ success: true, message: 'Email notification skipped (recipient preference)', skipped: true })
+    }
+
     // Fire-and-forget — never block the response
-    sendEmailNotification(eventType, to, data, { immediate }).catch((err: Error) => {
+    sendEmailNotification(eventType, sendTo, data, { immediate }).catch((err: Error) => {
       console.error(`${EMAIL_LOG_PREFIX} Notification send failed:`, err.message)
     })
 
@@ -91,6 +117,65 @@ router.post('/notification', async (req: AuthenticatedRequest, res: Response) =>
     return res.json({ success: true, message: 'Email notification queued' })
   }
 })
+
+/**
+ * Drop recipients who explicitly disabled this event on the Email channel.
+ * Recipients are resolved server-side by normalized email — unknown addresses
+ * (e.g. external contacts) are kept, defaults are always enabled.
+ */
+async function filterByEmailPreferences(to: string | string[], eventType: string): Promise<string | string[]> {
+  const addresses = (Array.isArray(to) ? to : [to])
+    .map((a) => typeof a === 'string' ? a.trim() : '')
+    .filter(Boolean)
+  if (addresses.length === 0) return []
+
+  try {
+    const { db } = await import('../config/db')
+    const { user } = await import('../models/schema')
+    const { sql } = await import('drizzle-orm')
+    const { normalizeEmail } = await import('../utils/email')
+    const {
+      canonicalNotificationEvent,
+      isNotificationEnabled,
+    } = await import('../lib/notification-preferences')
+
+    const canonical = canonicalNotificationEvent(eventType)
+    if (!canonical) return addresses
+
+    const normalized = addresses.map(a => normalizeEmail(a)).filter(Boolean)
+    const prefRepoModule = await import('../repositories/notification-preference.repository')
+
+    const matchedUsers = await db
+      .select({ id: user.id, email: user.email, role: user.role, enableTeamsNotifications: user.enableTeamsNotifications })
+      .from(user)
+      .where(sql`LOWER(${user.email}) IN (${sql.join(normalized.map(e => sql`${e}`), ',')})`)
+
+    const matched = new Map(matchedUsers.map(u => [u.email.toLowerCase(), u]))
+    const prefIndex = await loadPrefIndex(matchedUsers.map(u => u.id), prefRepoModule)
+
+    return addresses.filter(addr => {
+      const u = matched.get(normalizeEmail(addr))
+      if (!u) return true // not a portal user — keep (defaults apply)
+      const rows = prefIndex.get(u.id)
+      return isNotificationEnabled(rows, 'email', canonical, { role: u.role, enableTeamsNotifications: u.enableTeamsNotifications ?? false })
+    })
+  } catch (err) {
+    // Preference filtering must never block delivery — fail open on lookup errors.
+    console.warn(`${EMAIL_LOG_PREFIX} Preference filter failed — proceeding: ${err instanceof Error ? err.message : String(err)}`)
+    return addresses
+  }
+}
+
+async function loadPrefIndex(userIds: string[], prefRepo: any): Promise<Map<string, Map<string, boolean>>> {
+  if (userIds.length === 0) return new Map()
+  const rows = await prefRepo.findByUserIds([...new Set(userIds)])
+  const map = new Map<string, Map<string, boolean>>()
+  for (const id of new Set(userIds)) {
+    const own = rows.filter((r: any) => r.userId === id)
+    map.set(id, indexPreferences(own))
+  }
+  return map
+}
 
 /**
  * Route emails to the correct service method based on event type.
@@ -137,6 +222,7 @@ async function sendEmailNotification(
       sendAdditionalHoursRejected(to, data, opts)
       break
     case 'ticket_resolved':
+    case 'awaiting_client_review':
       sendTicketResolved(to, data, opts)
       break
     case 'ticket_closed':

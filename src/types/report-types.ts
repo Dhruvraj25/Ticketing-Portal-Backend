@@ -23,6 +23,7 @@ export type ReportType =
   | 'estimate_approval'
   | 'estimate_additional_hours'
   | 'wallet_history'
+  | 'actual_vs_estimated'
 
 export const REPORT_TYPE_OPTIONS: { value: ReportType; label: string; category: string }[] = [
   // Tickets
@@ -64,6 +65,9 @@ export const REPORT_TYPE_OPTIONS: { value: ReportType; label: string; category: 
 
   // Wallet History
   { value: 'wallet_history', label: 'Support Wallet History Report', category: 'Support Wallets' },
+
+  // Time Tracking
+  { value: 'actual_vs_estimated', label: 'Actual vs Estimated Time Report', category: 'Time Tracking' },
 ]
 
 export const REPORT_TYPE_LABELS: Record<string, string> = {}

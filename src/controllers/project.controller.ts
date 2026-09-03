@@ -11,8 +11,11 @@ export const getProjectById = wrapController('getProjectById', async (projectId:
 export const createProject = wrapController('createProject', async (data: any, currentUser: AuthenticatedUser) =>
   projectService.createProject(data, currentUser))
 
-export const updateProject = wrapController('updateProject', async (projectId: number, data: any) =>
-  projectService.updateProject(projectId, data))
+export const updateProject = wrapController('updateProject', async (projectId: number, data: any, currentUser: AuthenticatedUser) =>
+  projectService.updateProject(projectId, data, currentUser))
 
-export const archiveProject = wrapController('archiveProject', async (projectId: number) =>
-  projectService.archiveProject(projectId))
+export const archiveProject = wrapController('archiveProject', async (projectId: number, currentUser: AuthenticatedUser) =>
+  projectService.archiveProject(projectId, currentUser))
+
+export const reassignProject = wrapController('reassignProject', async (projectId: number, data: { clientId?: string; managerId?: string }, currentUser: AuthenticatedUser) =>
+  projectService.reassignProject(projectId, data, currentUser))

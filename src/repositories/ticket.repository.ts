@@ -15,7 +15,8 @@ export async function findById(id: number) {
   const [row] = await db
     .select({
       id: ticket.id, ticketNumber: ticket.ticketNumber, title: ticket.title,
-      description: ticket.description, status: ticket.status, priority: ticket.priority,
+      description: ticket.description, type: ticket.type,
+      status: ticket.status, priority: ticket.priority,
       category: ticket.category, clientId: ticket.clientId,
       assignedToId: ticket.assignedToId, assignedById: ticket.assignedById,
       projectId: ticket.projectId, moduleId: ticket.moduleId,
@@ -47,7 +48,8 @@ export async function findMany(conditions: any[], orderField?: any, limitVal?: n
   const query = db
     .select({
       id: ticket.id, ticketNumber: ticket.ticketNumber, title: ticket.title,
-      description: ticket.description, status: ticket.status, priority: ticket.priority,
+      description: ticket.description, type: ticket.type,
+      status: ticket.status, priority: ticket.priority,
       category: ticket.category, clientId: ticket.clientId,
       assignedToId: ticket.assignedToId, assignedById: ticket.assignedById,
       projectId: ticket.projectId, moduleId: ticket.moduleId,
@@ -309,6 +311,49 @@ export async function totalLoggedMinutes() {
     .from(timeLog)
     .where(isNotNull(timeLog.endTime))
   return Number(row?.total) || 0
+}
+
+/**
+ * Client-dashboard KPI counts scoped to a set of accessible client IDs.
+ * total / in progress / pending client approval / closed.
+ */
+export async function clientDashboardCounts(clientIds: string[]) {
+  if (clientIds.length === 0) {
+    return { total: 0, inProgress: 0, pendingApproval: 0, closed: 0 }
+  }
+  const [row] = await db
+    .select({
+      total: sql<number>`COUNT(*)::int`,
+      inProgress: sql<number>`COUNT(*) FILTER (WHERE ${ticket.status} IN ('assigned','in_progress','rework','request_for_revision'))::int`,
+      pendingApproval: sql<number>`COUNT(*) FILTER (WHERE ${ticket.status} IN ('estimate_pending','estimate_approved','resolved','client_review','manager_review'))::int`,
+      closed: sql<number>`COUNT(*) FILTER (WHERE ${ticket.status} = 'closed')::int`,
+    })
+    .from(ticket)
+    .where(inArray(ticket.clientId, clientIds))
+  return {
+    total: Number(row?.total) || 0,
+    inProgress: Number(row?.inProgress) || 0,
+    pendingApproval: Number(row?.pendingApproval) || 0,
+    closed: Number(row?.closed) || 0,
+  }
+}
+
+/** Manager KPI: revision and rework counts scoped to the manager's projects. */
+export async function revisionReworkCounts(projectIds: number[] | null) {
+  const conds: any[] = []
+  if (projectIds) conds.push(inArray(ticket.projectId, projectIds))
+  const rows = await db
+    .select({ status: ticket.status, count: count() })
+    .from(ticket)
+    .where(conds.length > 0 ? and(...conds) : undefined)
+    .groupBy(ticket.status)
+  let revisionCount = 0
+  let reworkCount = 0
+  for (const r of rows) {
+    if (r.status === 'request_for_revision') revisionCount = Number(r.count) || 0
+    if (r.status === 'rework') reworkCount = Number(r.count) || 0
+  }
+  return { revisionCount, reworkCount }
 }
 
 export async function sumDurationByUser(userId: string) {

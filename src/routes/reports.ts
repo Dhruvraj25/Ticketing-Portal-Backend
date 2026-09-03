@@ -26,3 +26,25 @@ router.get('/form-data', requireAuth, async (req: AuthenticatedRequest, res: Res
   }
 })
 
+// ─── Manager KPI — Revision & Rework counts ───────────────────────────────
+router.get('/revision-rework-counts', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { getRevisionReworkCounts } = await import('../controllers/reports/kpi.reports')
+    const result = await getRevisionReworkCounts(req.user!)
+    return res.json(result)
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message })
+  }
+})
+
+// ─── Client Dashboard Report ───────────────────────────────────────────────
+router.get('/client-dashboard', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { getClientDashboardReport } = await import('../controllers/reports/kpi.reports')
+    const result = await getClientDashboardReport(req.user!)
+    return res.json(result)
+  } catch (err: any) {
+    return res.status(400).json({ error: err.message })
+  }
+})
+

@@ -318,8 +318,8 @@ export function welcomeCard(
   ]
 
   return buildCard(
-    'Welcome to SupportHub',
-    p.message || 'Welcome to SupportHub. Your account is ready to use.',
+    'Welcome to Support Hero',
+    p.message || 'Welcome to Support Hero. Your account is ready to use.',
     body,
     p.url,
     getColor(p)
@@ -419,7 +419,7 @@ export function testMessageCard(p: TeamsNotificationPayload): AdaptiveCard {
   ]
   return buildCard(
     p.title || 'Test Message',
-    p.message || 'Teams integration test from SupportHub.',
+    p.message || 'Teams integration test from Support Hero.',
     body, p.url, getColor(p),
   )
 }

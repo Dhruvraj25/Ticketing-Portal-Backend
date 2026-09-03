@@ -12,13 +12,13 @@ export function welcomeTemplate(
   branding?: BrandingConfig,
 ): string {
   const content =
-    emailHeading('Welcome to SupportHub') +
-    emailParagraph(`Welcome! We're excited to have you on board. Your account has been created and you can now log in to the SupportHub portal.`) +
+    emailHeading('Welcome to Support Hero') +
+    emailParagraph(`Welcome! We're excited to have you on board. Your account has been created and you can now log in to the Support Hero portal.`) +
     emailFieldTable(
       emailFieldRow('Email', escapeHtml(data.userEmail)),
     ) +
     emailParagraph('Click the button below to log in and get started.') +
-    emailButton('Log In to SupportHub', data.loginUrl, branding) +
+    emailButton('Log In to Support Hero', data.loginUrl, branding) +
     emailParagraph('If you have any questions, please contact your system administrator.')
 
   return baseWrapper(content, branding)

@@ -17,13 +17,13 @@ export function loginCredentialsTemplate(
   branding?: BrandingConfig,
 ): string {
   const content =
-    emailHeading('Your SupportHub Login Credentials') +
-    emailParagraph(`Hi${data.recipientName ? ' ' + escapeHtml(data.recipientName) : ''}, an account has been created for you on the SupportHub portal. Use the credentials below to sign in.`) +
+    emailHeading('Your Support Hero Login Credentials') +
+    emailParagraph(`Hi${data.recipientName ? ' ' + escapeHtml(data.recipientName) : ''}, an account has been created for you on the Support Hero portal. Use the credentials below to sign in.`) +
     emailFieldTable(
       emailFieldRow('Email', escapeHtml(data.userEmail)) +
       emailFieldRow('Password', escapeHtml(data.initialPassword)),
     ) +
-    emailButton('Log In to SupportHub', data.loginUrl, branding) +
+    emailButton('Log In to Support Hero', data.loginUrl, branding) +
     (data.resetLink
       ? emailSmallText(`Prefer to set your own password? <a href="${escapeHtml(data.resetLink)}" style="color:#2563EB;text-decoration:underline">Reset your password</a> before signing in.`)
       : '') +

@@ -9,7 +9,7 @@ import type { SenderConfig } from './email.types'
  * All values should be overridden via environment variables.
  */
 export const DEFAULT_SENDER_CONFIG: SenderConfig = {
-  fromName: 'SupportHub',
+  fromName: 'Support Hero',
   fromAddress: 'support@infinixotech.com',
 }
 

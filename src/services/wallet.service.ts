@@ -1,5 +1,37 @@
 import * as walletRepo from '../repositories/wallet.repository'
-import { assertFound } from '../utils/errors'
+import * as projectRepo from '../repositories/project.repository'
+import { db } from '../config/db'
+import { project as projectTable } from '../models/schema'
+import { inArray } from 'drizzle-orm'
+import { assertFound, ForbiddenError } from '../utils/errors'
+
+// ─── Tenant scoping helpers ────────────────────────────────────────────────
+// Wallets belong to a client organization. Clients may only see their own
+// org's wallet; managers may only see wallets of clients on projects they
+// manage; admins see everything. Developers have no wallet access.
+
+/** Client IDs whose projects the manager manages. */
+async function getManagerScopedClientIds(managerId: string): Promise<string[]> {
+  const rows = await db
+    .select({ clientId: projectTable.clientId })
+    .from(projectTable)
+    .where(inArray(projectTable.managerId, [managerId]))
+  return [...new Set(rows.map(r => r.clientId))]
+}
+
+async function assertWalletAccess(wallet: { id: number; clientId: string }, user: { id: string; role: string }) {
+  if (user.role === 'admin') return
+  if (user.role === 'client') {
+    if (wallet.clientId !== user.id) throw new ForbiddenError('Access denied')
+    return
+  }
+  if (user.role === 'project_manager') {
+    const scoped = await getManagerScopedClientIds(user.id)
+    if (scoped.includes(wallet.clientId)) return
+    throw new ForbiddenError('Access denied')
+  }
+  throw new ForbiddenError('Access denied')
+}
 
 // ─── Ensure Wallet Exists (Idempotent) ─────────────────────────────────────
 
@@ -40,17 +72,25 @@ export async function ensureWalletForClient(
 // ─── Get Wallets ───────────────────────────────────────────────────────────
 
 /**
- * Get wallets. For clients, returns their ONE wallet.
- * For admins, returns all wallets (one per client).
+ * Get wallets scoped to the caller:
+ *   - client: their organization's single wallet
+ *   - project_manager: wallets of clients on projects they manage
+ *   - admin: all wallets
+ *   - developer: none
  */
 export async function getWallets(currentUser: { id: string; role: string }) {
   if (currentUser.role === 'client') {
-    // Client: return their single wallet (or empty array if none)
     const wallet = await walletRepo.findByClientId(currentUser.id)
     return wallet ? [wallet] : []
   }
-  // Admin/manager: return all wallets
-  return walletRepo.findMany([])
+  if (currentUser.role === 'project_manager') {
+    const clientIds = await getManagerScopedClientIds(currentUser.id)
+    return walletRepo.findManyByClientIds(clientIds)
+  }
+  if (currentUser.role === 'admin') {
+    return walletRepo.findMany([])
+  }
+  return []
 }
 
 /**
@@ -59,11 +99,7 @@ export async function getWallets(currentUser: { id: string; role: string }) {
 export async function getWalletById(walletId: number, currentUser: { id: string; role: string }) {
   const w = await walletRepo.findById(walletId)
   assertFound(w, 'Wallet not found')
-
-  // Authorization: clients can only see their own wallet
-  if (currentUser.role === 'client' && w.clientId !== currentUser.id) {
-    throw new (await import('../utils/errors')).ForbiddenError('Access denied')
-  }
+  await assertWalletAccess(w, currentUser)
 
   const alerts = await walletRepo.findActiveAlerts()
   return { ...w, alerts }
@@ -76,9 +112,7 @@ export async function getWalletTransactions(walletId: number, currentUser?: { id
   if (currentUser) {
     const w = await walletRepo.findById(walletId)
     assertFound(w, 'Wallet not found')
-    if (currentUser.role === 'client' && w.clientId !== currentUser.id) {
-      throw new (await import('../utils/errors')).ForbiddenError('Access denied')
-    }
+    await assertWalletAccess(w, currentUser)
   }
   return walletRepo.findTransactions(walletId)
 }
@@ -91,8 +125,8 @@ export async function getWalletTicketConsumption(walletId: number, currentUser?:
   const w = await walletRepo.findById(walletId)
   assertFound(w, 'Wallet not found')
 
-  if (currentUser && currentUser.role === 'client' && w.clientId !== currentUser.id) {
-    throw new (await import('../utils/errors')).ForbiddenError('Access denied')
+  if (currentUser) {
+    await assertWalletAccess(w, currentUser)
   }
 
   // Return breakdown by project
@@ -111,17 +145,17 @@ export async function getWalletTicketConsumption(walletId: number, currentUser?:
 // ─── Add Hours ─────────────────────────────────────────────────────────────
 
 /**
- * Add support hours to a client wallet.
- * Always operates on the CLIENT's single wallet.
+ * Add support hours to a client wallet. Admins may recharge any client;
+ * managers may only recharge clients on projects they manage. Clients can
+ * never add hours to their own wallet.
  */
 export async function addWalletHours(data: any, currentUser: any) {
+  if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'project_manager')) {
+    throw new ForbiddenError('Only admins and managers can add wallet hours')
+  }
   const w = await walletRepo.findById(data.walletId)
   assertFound(w, 'Wallet not found')
-
-  // Authorization check for clients
-  if (currentUser?.role === 'client' && w.clientId !== currentUser.id) {
-    throw new (await import('../utils/errors')).ForbiddenError('Access denied')
-  }
+  await assertWalletAccess(w, currentUser)
 
   const newTotalPurchased = Number(w.totalPurchasedHours) + Number(data.hours)
   const newRemaining = Number(w.remainingHours) + Number(data.hours)
@@ -231,14 +265,16 @@ export async function checkClientCanCreateTicket(
   }
 }
 
-// ─── Dashboard Stats ───────────────────────────────────────────────────────
+// ─── Admin Dashboard Stats ─────────────────────────────────────────────────
 
 /**
  * Dashboard stats: aggregate across all client wallets.
- * In the new architecture, there is one wallet per client,
- * so total wallets = total clients with wallets.
+ * Admin-only — the figures are global and reveal other organizations' data.
  */
-export async function getWalletDashboardStats() {
+export async function getWalletDashboardStats(currentUser?: { id: string; role: string }) {
+  if (!currentUser || currentUser.role !== 'admin') {
+    throw new ForbiddenError('Access denied')
+  }
   const wallets = await walletRepo.findAll()
   const totalPurchased = wallets.reduce((s, w) => s + Number(w.totalPurchasedHours), 0)
   const totalConsumed = wallets.reduce((s, w) => s + Number(w.consumedHours), 0)
@@ -255,12 +291,18 @@ export async function getWalletDashboardStats() {
   }
 }
 
-// ─── Low Balance / Alerts ──────────────────────────────────────────────────
+// ─── Low Balance / Alerts (admin dashboards) ───────────────────────────────
 
-export async function getLowBalanceWallets(threshold: number) {
+export async function getLowBalanceWallets(threshold: number, currentUser?: { id: string; role: string }) {
+  if (!currentUser || currentUser.role !== 'admin') {
+    throw new ForbiddenError('Access denied')
+  }
   return walletRepo.findLowBalance(threshold)
 }
 
-export async function getActiveWalletAlerts() {
+export async function getActiveWalletAlerts(currentUser?: { id: string; role: string }) {
+  if (!currentUser || currentUser.role !== 'admin') {
+    throw new ForbiddenError('Access denied')
+  }
   return walletRepo.findActiveAlerts()
 }

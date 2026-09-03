@@ -1,10 +1,10 @@
 import { Request, Response } from "express";
 import { sendWelcomeEmail } from "../services/email/email.service";
+import { getFrontendUrl } from "../utils/frontend-url";
 
 export async function sendTestEmail(req: Request, res: Response) {
   try {
-    const portalUrl =
-      process.env.FRONTEND_URL || "http://localhost:3000";
+    const portalUrl = getFrontendUrl();
 
     sendWelcomeEmail(
       "support@infinixotech.com",

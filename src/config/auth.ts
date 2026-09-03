@@ -3,6 +3,8 @@ import { pool } from './db'
 import { db } from './db'
 import { user as userTable } from '../models/schema'
 import { and, eq } from 'drizzle-orm'
+import { getFrontendUrl } from '../utils/frontend-url'
+import { normalizeEmail } from '../utils/email'
 
 export const auth = betterAuth({
   database: pool,
@@ -19,16 +21,36 @@ export const auth = betterAuth({
         defaultValue: 'client',
         input: false,
       },
+      // User profile fields — persisted on the user row and returned in the
+      // session user so the frontend always sees the latest values.
+      about: {
+        type: 'string',
+        input: false,
+      },
+      timezone: {
+        type: 'string',
+        input: false,
+      },
     },
   },
-  trustedOrigins: [
-    ...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : ['http://localhost:3000']),
-  ],
+  trustedOrigins: [getFrontendUrl()],
   session: {
     expiresIn: 60 * 60 * 24 * 7,
     updateAge: 60 * 60 * 24,
   },
   databaseHooks: {
+    user: {
+      create: {
+        before: async (userRecord) => {
+          // Normalize email casing so User@Company.com and user@company.com
+          // can never create two accounts.
+          if (userRecord.email) {
+            userRecord.email = normalizeEmail(userRecord.email)
+          }
+          return { data: userRecord }
+        },
+      },
+    },
     session: {
       create: {
         before: async (session) => {
@@ -53,7 +75,28 @@ export const auth = betterAuth({
       },
     },
   },
-  plugins: [],
+  // Normalize email casing on auth endpoints so login, registration, and
+  // password reset are all case-insensitive.
+  plugins: [
+    {
+      id: 'email-case-normalization',
+      hooks: {
+        before: [
+          {
+            matcher(context: any) {
+              return ['/sign-in/email', '/sign-up/email', '/request-password-reset'].includes(context.path || '')
+            },
+            handler: async (ctx: any) => {
+              const body = ctx.context?.body
+              if (body && typeof body.email === 'string') {
+                body.email = normalizeEmail(body.email)
+              }
+            },
+          },
+        ],
+      },
+    } as any,
+  ],
 })
 
 // ─── Welcome Email Helper (Backend) ─────────────────────────────────────────
@@ -78,17 +121,14 @@ async function sendWelcomeEmailForUser(userId: string, userName: string, userEma
     // Send welcome email using the backend email service directly
     try {
       const { sendWelcomeEmail } = await import('../services/email/email.service')
-     const portalUrl = process.env.FRONTEND_URL
+      const portalUrl = getFrontendUrl()
 
-if (!portalUrl) {
-  throw new Error('FRONTEND_URL is not configured')
-}
       sendWelcomeEmail(userEmail, {
         userEmail,
         recipientName: userName,
         recipientEmail: userEmail,
         loginUrl: `${portalUrl}/sign-in`,
-        companyName: process.env.COMPANY_NAME || 'SupportHub',
+        companyName: process.env.COMPANY_NAME || 'Support Hero',
         portalUrl,
       })
       console.log(`[WelcomeEmail] Queued - User: ${userName}, Email: ${userEmail}`)

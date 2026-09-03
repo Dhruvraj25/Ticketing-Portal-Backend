@@ -17,11 +17,11 @@ export const getWalletTicketConsumption = wrapController('getWalletTicketConsump
 export const addWalletHours = wrapController('addWalletHours', async (data: any, currentUser: AuthenticatedUser) =>
   walletService.addWalletHours(data, currentUser))
 
-export const getWalletDashboardStats = wrapController('getWalletDashboardStats', async () =>
-  walletService.getWalletDashboardStats())
+export const getWalletDashboardStats = wrapController('getWalletDashboardStats', async (currentUser: AuthenticatedUser) =>
+  walletService.getWalletDashboardStats(currentUser))
 
-export const getLowBalanceWallets = wrapController('getLowBalanceWallets', async (threshold: number) =>
-  walletService.getLowBalanceWallets(threshold))
+export const getLowBalanceWallets = wrapController('getLowBalanceWallets', async (threshold: number, currentUser: AuthenticatedUser) =>
+  walletService.getLowBalanceWallets(threshold, currentUser))
 
-export const getActiveWalletAlerts = wrapController('getActiveWalletAlerts', async () =>
-  walletService.getActiveWalletAlerts())
+export const getActiveWalletAlerts = wrapController('getActiveWalletAlerts', async (currentUser: AuthenticatedUser) =>
+  walletService.getActiveWalletAlerts(currentUser))

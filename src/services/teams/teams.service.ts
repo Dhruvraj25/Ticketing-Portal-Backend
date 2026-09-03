@@ -419,7 +419,7 @@ export function sendPasswordReset(
 export function sendTestMessage(payload: Partial<TeamsNotificationPayload>): void {
   sendTeamsNotification('test_message', buildPayload(
     payload.title || 'Test Message',
-    payload.message || 'This is a test notification from SupportHub.',
+    payload.message || 'This is a test notification from Support Hero.',
     payload,
   ))
 }

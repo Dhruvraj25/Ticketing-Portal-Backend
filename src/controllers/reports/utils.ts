@@ -37,9 +37,37 @@ export function checkAccess(userRole: UserRole, reportType: ReportType): boolean
   const estimateReports: ReportType[] = [
     'estimate_approval', 'estimate_additional_hours',
   ]
+  const timeTrackingReports: ReportType[] = ['actual_vs_estimated']
 
-  if (userRole === 'project_manager') return [...managerReports, ...walletReports, ...estimateReports].includes(reportType)
-  if (userRole === 'developer') return devReports.includes(reportType)
+  if (userRole === 'project_manager') return [...managerReports, ...walletReports, ...estimateReports, ...timeTrackingReports].includes(reportType)
+  if (userRole === 'developer') return [...devReports, ...timeTrackingReports].includes(reportType)
   if (userRole === 'client') return clientReports.includes(reportType)
   return false
+}
+
+import { db } from '../../config/db'
+import { user } from '../../models/schema'
+import { sql } from 'drizzle-orm'
+
+/**
+ * Resolve the client-org scoping condition for report queries.
+ * Clients see tickets/projects of their entire organization, not just their
+ * own rows — while other organizations remain fully isolated.
+ */
+export async function getClientScopeCondition(clientUserId: string): Promise<{ clientIds: string[] } | null> {
+  const [me] = await db
+    .select({ id: user.id, role: user.role, accountId: user.accountId })
+    .from(user)
+    .where(sql`${user.id} = ${clientUserId}`)
+    .limit(1)
+  if (!me || me.role !== 'client') return null
+  if (!me.accountId) return { clientIds: [me.id] }
+
+  const members = await db
+    .select({ id: user.id })
+    .from(user)
+    .where(sql`${user.accountId} = ${me.accountId} AND ${user.role} = 'client'`)
+  const ids = members.map(m => m.id)
+  if (!ids.includes(me.id)) ids.push(me.id)
+  return { clientIds: ids }
 }

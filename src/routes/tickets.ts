@@ -40,10 +40,46 @@ router.post('/', requireAuth, async (req: AuthenticatedRequest, res: Response) =
 router.patch('/:id/status', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
   try {
     const { updateTicketStatus } = await import('../controllers/ticket.controller')
-    await updateTicketStatus(parseInt(req.params.id as string), req.body.status, req.user!)
-    return res.json({ success: true })
+    const result = await updateTicketStatus(parseInt(req.params.id as string), req.body.status, req.user!)
+    return res.json(result)
   } catch (err: any) {
     return res.status(400).json({ error: err.message })
+  }
+})
+
+// ─── Manager: change ticket priority ─────────────────────────────────────
+router.patch('/:id/priority', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { changeTicketPriority } = await import('../controllers/ticket.controller')
+    const result = await changeTicketPriority(parseInt(req.params.id as string), req.body.priority, req.user!)
+    return res.json(result)
+  } catch (err: any) {
+    const status = err.statusCode && Number(err.statusCode) >= 400 && Number(err.statusCode) < 500 ? Number(err.statusCode) : 400
+    return res.status(status).json({ error: err.message })
+  }
+})
+
+// ─── Admin: change ticket creation/closing dates ─────────────────────────
+router.patch('/:id/dates', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { changeTicketDates } = await import('../controllers/ticket.controller')
+    const result = await changeTicketDates(parseInt(req.params.id as string), req.body, req.user!)
+    return res.json(result)
+  } catch (err: any) {
+    const status = err.statusCode && Number(err.statusCode) >= 400 && Number(err.statusCode) < 500 ? Number(err.statusCode) : 400
+    return res.status(status).json({ error: err.message })
+  }
+})
+
+// ─── Update ticket fields (Save Draft / Edit) ───────────────────────────
+router.patch('/:id', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { updateTicket } = await import('../controllers/ticket.controller')
+    const result = await updateTicket(parseInt(req.params.id as string), req.body, req.user!)
+    return res.json(result)
+  } catch (err: any) {
+    const status = err.statusCode && Number(err.statusCode) >= 400 && Number(err.statusCode) < 500 ? Number(err.statusCode) : 400
+    return res.status(status).json({ error: err.message })
   }
 })
 

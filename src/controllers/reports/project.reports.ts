@@ -3,12 +3,19 @@ import { project, ticket, module as moduleTable, user } from '../../models/schem
 import { and, eq, desc, lte, gte, count, isNotNull, sql, inArray } from 'drizzle-orm'
 import { TicketStatus as TS } from '../../types/index'
 import type { ReportFilters, ReportResult } from './types'
-import { getDateRange } from './utils'
+import { getDateRange, getClientScopeCondition } from './utils'
+
+async function applyClientScope(conditions: any[], currentUser: { id: string; role: string }) {
+  if (currentUser.role === 'client') {
+    const scope = await getClientScopeCondition(currentUser.id)
+    if (scope) conditions.push(inArray(project.clientId, scope.clientIds))
+  }
+}
 
 export async function getProjectSummaryReport(filters: ReportFilters, currentUser: { id: string; role: string }): Promise<ReportResult> {
   const conditions: any[] = []
   if (filters.clientId) conditions.push(eq(project.clientId, filters.clientId))
-  if (currentUser.role === 'client') conditions.push(eq(project.clientId, currentUser.id))
+  await applyClientScope(conditions, currentUser)
   const projects = await db
     .select({
       id: project.id,
@@ -53,7 +60,7 @@ export async function getProjectSummaryReport(filters: ReportFilters, currentUse
 
 export async function getProjectProgressReport(filters: ReportFilters, currentUser: { id: string; role: string }): Promise<ReportResult> {
   const conditions: any[] = [eq(project.status, 'active')]
-  if (currentUser.role === 'client') conditions.push(eq(project.clientId, currentUser.id))
+  await applyClientScope(conditions, currentUser)
   if (filters.clientId) conditions.push(eq(project.clientId, filters.clientId))
 
   const projects = await db
@@ -150,8 +157,10 @@ export async function getModuleReportMain(filters: ReportFilters, currentUser: {
 
 export async function getClientProjectReport(filters: ReportFilters, currentUser: { id: string; role: string }): Promise<ReportResult> {
   let clientIds: string[] | undefined
-  if (currentUser.role === 'client') clientIds = [currentUser.id]
-  else if (filters.clientId) clientIds = [filters.clientId]
+  if (currentUser.role === 'client') {
+    const scope = await getClientScopeCondition(currentUser.id)
+    clientIds = scope?.clientIds
+  } else if (filters.clientId) clientIds = [filters.clientId]
 
   const clientsQuery = clientIds
     ? await db.select({ id: user.id, name: user.name, email: user.email }).from(user).where(and(eq(user.role, 'client'), inArray(user.id, clientIds)))
