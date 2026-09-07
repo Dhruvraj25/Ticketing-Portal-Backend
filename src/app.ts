@@ -13,6 +13,7 @@ import { modulesRouter } from './routes/modules'
 import { walletsRouter } from './routes/wallets'
 import { notificationsRouter } from './routes/notifications'
 import { reportsRouter } from './routes/reports'
+import clientNotificationPreferencesRouter from './routes/client-notification-preferences'
 import { attachmentsRouter } from './routes/attachments'
 import { onboardingRouter } from './routes/onboarding'
 import { errorHandler } from './middleware/error-handler'
@@ -51,6 +52,7 @@ app.use('/api/projects', routeTimingMiddleware('Projects'), projectsRouter)
 app.use('/api/modules', routeTimingMiddleware('Modules'), modulesRouter)
 app.use('/api/wallets', routeTimingMiddleware('Wallets'), walletsRouter)
 app.use('/api/notifications', routeTimingMiddleware('Notifications'), notificationsRouter)
+app.use('/api/clients', routeTimingMiddleware('ClientNotificationPreferences'), clientNotificationPreferencesRouter)
 app.use('/api/reports', routeTimingMiddleware('Reports'), reportsRouter)
 app.use('/api/attachments', routeTimingMiddleware('Attachments'), attachmentsRouter)
 app.use('/api/onboarding', routeTimingMiddleware('Onboarding'), onboardingRouter)

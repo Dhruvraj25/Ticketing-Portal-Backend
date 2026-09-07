@@ -134,7 +134,8 @@ export function defaultNotificationEnabled(
 
 /** A stored preference row (what the repository returns). */
 export interface NotificationPreferenceRow {
-  userId: string
+  userId?: string
+  clientId?: string
   channel: string
   eventType: string
   enabled: boolean
@@ -143,6 +144,22 @@ export interface NotificationPreferenceRow {
 /** Index rows by `${channel}:${eventType}` for fast lookups. */
 export function indexPreferences(
   rows: NotificationPreferenceRow[],
+): Map<string, boolean> {
+  const map = new Map<string, boolean>()
+  for (const row of rows) {
+    const key = row.channel + ':' + canonicalNotificationEvent(row.eventType)
+    if (key.endsWith(':null')) continue
+    map.set(key, row.enabled)
+  }
+  return map
+}
+
+/**
+ * Index rows by `${channel}:${eventType}` for fast lookups.
+ * Supports both userId-based and clientId-based rows.
+ */
+export function indexPreferencesFlexible(
+  rows: Array<{ userId?: string; clientId?: string; channel: string; eventType: string; enabled: boolean }>,
 ): Map<string, boolean> {
   const map = new Map<string, boolean>()
   for (const row of rows) {

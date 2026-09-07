@@ -21,16 +21,23 @@ export async function markAllAsRead(userId: string) {
 /**
  * Create an in-app notification for a user.
  *
- * Requirement #14: the backend enforces per-event In-App preferences — when the
- * recipient has explicitly disabled this event on the In-App channel, no row is
- * created. `eventType` is optional for legacy callers; when omitted the default
+ * Requirement: the backend enforces per-event In-App preferences.
+ * For client users, use client-based preferences. For internal users, use user-based.
+ * `eventType` is optional for legacy callers; when omitted the default
  * (enabled) behavior applies, so existing notifications are never suppressed.
  */
-export async function createNotification(data: { userId: string; title: string; message: string; link?: string; ticketId?: number; eventType?: string }) {
+export async function createNotification(data: { userId: string; title: string; message: string; link?: string; ticketId?: number; eventType?: string; userRole?: string; clientId?: string }) {
   if (data.eventType) {
-    const rows = await prefRepo.findByUserId(data.userId)
+    let rows: any[]
+    // For client users, use client-based preferences
+    if (data.userRole === 'client' && data.clientId) {
+      rows = await prefRepo.findByClientId(data.clientId)
+    } else {
+      rows = await prefRepo.findByUserId(data.userId)
+    }
     const indexed = indexPreferences(rows)
-    const allowed = isNotificationEnabled(indexed, 'in_app', data.eventType, { role: 'admin' })
+    const role = data.userRole || 'admin'
+    const allowed = isNotificationEnabled(indexed, 'in_app', data.eventType, { role })
     if (!allowed) return false
   }
   await notificationRepo.insert({

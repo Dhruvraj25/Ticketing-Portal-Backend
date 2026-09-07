@@ -122,6 +122,7 @@ router.post('/notification', requireAuth, async (req: AuthenticatedRequest, res:
  * Drop recipients who explicitly disabled this event on the Email channel.
  * Recipients are resolved server-side by normalized email — unknown addresses
  * (e.g. external contacts) are kept, defaults are always enabled.
+ * For client users, use client-based preferences.
  */
 async function filterByEmailPreferences(to: string | string[], eventType: string): Promise<string | string[]> {
   const addresses = (Array.isArray(to) ? to : [to])
@@ -146,16 +147,24 @@ async function filterByEmailPreferences(to: string | string[], eventType: string
     const prefRepoModule = await import('../repositories/notification-preference.repository')
 
     const matchedUsers = await db
-      .select({ id: user.id, email: user.email, role: user.role, enableTeamsNotifications: user.enableTeamsNotifications })
+      .select({ id: user.id, email: user.email, role: user.role, enableTeamsNotifications: user.enableTeamsNotifications, accountId: user.accountId })
       .from(user)
       .where(sql`LOWER(${user.email}) IN (${sql.join(normalized.map(e => sql`${e}`), ',')})`)
 
     const matched = new Map(matchedUsers.map(u => [u.email.toLowerCase(), u]))
-    const prefIndex = await loadPrefIndex(matchedUsers.map(u => u.id), prefRepoModule)
+    // Build preference index: for client users use client-based, for internal use user-based
+    const prefIndex = await loadPrefIndexWithClientSupport(matchedUsers, prefRepoModule)
 
     return addresses.filter(addr => {
       const u = matched.get(normalizeEmail(addr))
       if (!u) return true // not a portal user — keep (defaults apply)
+      // For client users, check client-based preferences
+      if (u.role === 'client' && u.accountId) {
+        // Use accountId as client identifier for client-based preferences
+        const clientRows = prefIndex.get(u.accountId)
+        return isNotificationEnabled(clientRows, 'email', canonical, { role: 'client', enableTeamsNotifications: u.enableTeamsNotifications ?? false })
+      }
+      // For internal users, check user-based preferences
       const rows = prefIndex.get(u.id)
       return isNotificationEnabled(rows, 'email', canonical, { role: u.role, enableTeamsNotifications: u.enableTeamsNotifications ?? false })
     })
@@ -166,14 +175,33 @@ async function filterByEmailPreferences(to: string | string[], eventType: string
   }
 }
 
-async function loadPrefIndex(userIds: string[], prefRepo: any): Promise<Map<string, Map<string, boolean>>> {
-  if (userIds.length === 0) return new Map()
-  const rows = await prefRepo.findByUserIds([...new Set(userIds)])
+async function loadPrefIndexWithClientSupport(users: any[], prefRepo: any): Promise<Map<string, Map<string, boolean>>> {
+  if (users.length === 0) return new Map()
   const map = new Map<string, Map<string, boolean>>()
-  for (const id of new Set(userIds)) {
-    const own = rows.filter((r: any) => r.userId === id)
-    map.set(id, indexPreferences(own))
+  
+  // Separate client users from internal users
+  const clientUserIds = new Set<string>()
+  const internalUserIds = new Set<string>()
+  for (const u of users) {
+    if (u.role === 'client' && u.accountId) {
+      clientUserIds.add(u.accountId)
+    } else {
+      internalUserIds.add(u.id)
+    }
   }
+
+  // Load client-based preferences for client accounts
+  for (const clientId of clientUserIds) {
+    const rows = await prefRepo.findByClientId(clientId)
+    map.set(clientId, indexPreferences(rows))
+  }
+
+  // Load user-based preferences for internal users
+  for (const userId of internalUserIds) {
+    const rows = await prefRepo.findByUserId(userId)
+    map.set(userId, indexPreferences(rows))
+  }
+
   return map
 }
 

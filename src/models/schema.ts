@@ -262,14 +262,22 @@ export const notification = pgTable('notification', {
 }))
 
 // --- Notification Preferences ----------------------------------------------
-// Requirement #14: one preference row per (user, channel, eventType). Absent
-// rows mean "use the default" (defaults preserve current behavior — see
-// src/lib/notification-preferences.ts), so only explicit user choices are
-// persisted. Channels: in_app | email | teams.
+// Requirement: Client-wise notification preferences.
+// Admin and Manager users manage notification preferences PER CLIENT.
+// Client users can NO LONGER manage their own preferences.
+//
+// One preference row per (client, channel, eventType). Absent rows mean
+// "use the default" (defaults preserve current behavior — see
+// src/lib/notification-preferences.ts), so only explicit Admin/Manager
+// choices are persisted. Channels: in_app | email | teams.
+//
+// The clientId references the user table where role = 'client'. Each client
+// account (including its Standard Client and Approver users) shares the same
+// notification preferences.
 
 export const notificationPreference = pgTable('notification_preferences', {
   id: serial('id').primaryKey(),
-  userId: text('userId')
+  clientId: text('clientId')
     .notNull()
     .references(() => user.id, { onDelete: 'cascade' }),
   channel: text('channel').notNull(),
@@ -278,8 +286,8 @@ export const notificationPreference = pgTable('notification_preferences', {
   createdAt: timestamp('createdAt').notNull().defaultNow(),
   updatedAt: timestamp('updatedAt').notNull().defaultNow(),
 }, (table) => ({
-  userChannelEventIdx: uniqueIndex('notification_pref_user_channel_event_idx').on(table.userId, table.channel, table.eventType),
-  userIdIdx: index('notification_pref_user_idx').on(table.userId),
+  clientChannelEventIdx: uniqueIndex('notification_pref_client_channel_event_idx').on(table.clientId, table.channel, table.eventType),
+  clientIdIdx: index('notification_pref_client_idx').on(table.clientId),
 }))
 
 // --- Branding Table -------------------------------------------------------

@@ -55,6 +55,7 @@ import * as prefRepo from '../repositories/notification-preference.repository'
 import {
   canonicalNotificationEvent,
   indexPreferences,
+  indexPreferencesFlexible,
   isNotificationEnabled,
   type NotificationChannel,
 } from './notification-preferences'
@@ -100,6 +101,8 @@ export interface DispatchRecipient {
   email: string
   role: string
   enableTeamsNotifications?: boolean
+  /** For client users, this is the client account ID used for client-based preferences */
+  clientId?: string
 }
 
 // ─── Email / Teams event spelling per canonical preference key ─────────────
@@ -434,10 +437,22 @@ export async function dispatchUserNotification(
     const canonical = canonicalNotificationEvent(eventType) || eventType
 
     // Preference index for this recipient (or reuse the caller's preloaded map).
-    let rowsForUser: Map<string, boolean> | undefined = options.prefIndex?.get(recipient.id)
-    if (rowsForUser === undefined) {
+    // For client users, use client-based preferences. For internal users, use user-based.
+    let rowsForUser: Map<string, boolean> | undefined
+    if (recipient.role === 'client' && recipient.clientId) {
+      // Use client-based preferences for client recipients
+      rowsForUser = options.prefIndex?.get(recipient.clientId)
+      if (rowsForUser === undefined) {
+        const rows = await prefRepo.findByClientId(recipient.clientId)
+        rowsForUser = indexPreferences(rows)
+      }
+    } else {
+      // Use user-based preferences for internal users (developer, project_manager, admin)
+      rowsForUser = options.prefIndex?.get(recipient.id)
+      if (rowsForUser === undefined) {
       const rows = await prefRepo.findByUserId(recipient.id)
-      rowsForUser = indexPreferences(rows)
+      rowsForUser = indexPreferencesFlexible(rows)
+    }
     }
     const prefUser = {
       role: recipient.role,

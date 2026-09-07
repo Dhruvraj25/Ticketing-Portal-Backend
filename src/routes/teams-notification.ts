@@ -60,21 +60,26 @@ router.post('/notification', requireAuth, async (req: AuthenticatedRequest, res:
         const { normalizeEmail } = await import('../utils/email')
 
         const [recipient] = recipientUserId
-          ? await db.select({ id: user.id, role: user.role, enableTeamsNotifications: user.enableTeamsNotifications })
+          ? await db.select({ id: user.id, role: user.role, enableTeamsNotifications: user.enableTeamsNotifications, accountId: user.accountId })
             .from(user).where(eq(user.id, recipientUserId)).limit(1)
-          : await db.select({ id: user.id, role: user.role, enableTeamsNotifications: user.enableTeamsNotifications })
+          : await db.select({ id: user.id, role: user.role, enableTeamsNotifications: user.enableTeamsNotifications, accountId: user.accountId })
             .from(user).where(sql`LOWER(${user.email}) = ${normalizeEmail(recipientEmail || '')}`).limit(1)
 
         if (recipient) {
           const canonical = canonicalNotificationEvent(eventType)
-          const rows = canonical
-            ? (await prefRepoModule.findByUserId(recipient.id))
-            : []
+          // For client users, use client-based preferences. For internal users, use user-based.
+          let rows: any[] = []
+          if (recipient.role === 'client' && recipient.accountId) {
+            rows = canonical ? (await prefRepoModule.findByClientId(recipient.accountId)) : []
+          } else {
+            rows = canonical ? (await prefRepoModule.findByUserId(recipient.id)) : []
+          }
           const indexed = indexPreferences(rows)
-          const enabled = isNotificationEnabled(indexed, 'teams', canonical || eventType, {
+          const prefUser = {
             role: recipient.role,
             enableTeamsNotifications: recipient.enableTeamsNotifications ?? false,
-          })
+          }
+          const enabled = isNotificationEnabled(indexed, 'teams', canonical || eventType, prefUser)
           if (!enabled) {
             console.log(TEAMS_LOG_PREFIX + ' Skipped notification for ' + recipient.id + ' (Teams preference disabled for event: ' + eventType + ')')
             return res.json({ success: true, message: 'Teams notification skipped (recipient preference)', skipped: true })
