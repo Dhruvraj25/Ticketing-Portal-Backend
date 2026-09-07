@@ -36,6 +36,13 @@
       "when": 1784266368002,
       "tag": "0009_nebulous_doctor_octopus",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1788774490806,
+      "tag": "0015_notification_preferences",
+      "breakpoints": true
     }
   ]
 }
