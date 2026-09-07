@@ -10,3 +10,4 @@ export const getAttachments = wrapController('getAttachments', async (ticketId: 
 
 export const deleteAttachment = wrapController('deleteAttachment', async (attachmentId: number, currentUser: AuthenticatedUser) =>
   attachmentService.deleteAttachment(attachmentId, currentUser))
+//  hello 
