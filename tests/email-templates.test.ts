@@ -18,7 +18,7 @@ test('branding: default company name is Support Hero', () => {
   assert.equal(getBranding().companyName, 'Support Hero')
 })
 
-test('email: templates use Support Hero branding, never SupportHub', () => {
+test('email: templates use Support Hero branding, never Support Hero', () => {
   const samples = [
     welcomeTemplate({ userEmail: 'a@b.com', loginUrl: `${PROD_URL}/sign-in` }, branding),
     ticketCreatedTemplate({ ticketNumber: 'TKT-1', ticketTitle: 'Bug', priority: 'high', createdBy: 'Alice', createdDate: '2026-01-01', ticketLink: `${PROD_URL}/dashboard/tickets/1` }, branding),
@@ -33,7 +33,7 @@ test('email: templates use Support Hero branding, never SupportHub', () => {
 
   for (const html of samples) {
     assert.ok(html.includes('Support Hero'), 'expected Support Hero branding in email')
-    assert.ok(!html.includes('SupportHub'), 'SupportHub must not appear in emails')
+    assert.ok(!html.includes('Support Hero'), 'Support Hero must not appear in emails')
     assert.ok(!html.includes('localhost:3000'), 'localhost:3000 must never appear in emails')
     assert.ok(!html.includes('http://localhost'), 'localhost links must never appear in emails')
   }
@@ -42,7 +42,7 @@ test('email: templates use Support Hero branding, never SupportHub', () => {
 test('email: buttons and links use the configured frontend URL', () => {
   const html = welcomeTemplate({ userEmail: 'a@b.com', loginUrl: `${PROD_URL}/sign-in` }, branding)
   assert.ok(html.includes(`href="${PROD_URL}/sign-in"`), 'login button must point at the configured frontend URL')
-  assert.ok(!html.includes('supporthub.app'), 'no hardcoded portal domain')
+  assert.ok(!html.includes('Support Hero.app'), 'no hardcoded portal domain')
 })
 
 test('email: ticket action button points at the configured ticket URL', () => {
@@ -72,7 +72,7 @@ test('email: manager review template renders recipient-relevant content and the 
   assert.ok(html.includes('TKT-7'))
   assert.ok(html.includes('Dana Dev'), 'must name who resolved it')
   assert.ok(html.includes('Support Hero'))
-  assert.ok(!html.includes('SupportHub'))
+  assert.ok(!html.includes('Support Hero'))
   assert.ok(!html.includes('localhost'))
 })
 
@@ -86,7 +86,7 @@ test('email: rework template renders the manager\'s instructions and the configu
   assert.ok(html.includes('Mary Manager'), 'must name the manager who requested rework')
   assert.ok(html.includes('Validate the email field before submit'), 'must include the rework notes')
   assert.ok(html.includes('Support Hero'))
-  assert.ok(!html.includes('SupportHub'))
+  assert.ok(!html.includes('Support Hero'))
   assert.ok(!html.includes('localhost'))
   // This template is developer-facing only — it must never claim to be from
   // or addressed to the client, or reference client-approval language.

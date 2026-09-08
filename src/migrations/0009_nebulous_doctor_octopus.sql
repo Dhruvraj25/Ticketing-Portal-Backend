@@ -1,7 +1,7 @@
 CREATE TABLE "branding" (
 	"id" serial PRIMARY KEY NOT NULL,
 	"companyId" text DEFAULT 'default' NOT NULL,
-	"companyName" text DEFAULT 'SupportHub' NOT NULL,
+	"companyName" text DEFAULT 'Support Hero' NOT NULL,
 	"logoUrl" text,
 	"logoPublicId" text,
 	"faviconUrl" text,

@@ -42,11 +42,11 @@ async function sendTestEmail() {
 
     const message = {
       message: {
-        subject: "SupportHub Microsoft Graph Test",
+        subject: "Support Hero Microsoft Graph Test",
         body: {
           contentType: "HTML",
           content: `
-            <h2>SupportHub Email Test</h2>
+            <h2>Support Hero Email Test</h2>
             <p>This is a test email sent through Microsoft Graph.</p>
             <p>If you received this email, Microsoft 365 email integration is working.</p>
           `,

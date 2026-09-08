@@ -201,7 +201,7 @@
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "default": "'SupportHub'"
+          "default": "'Support Hero'"
         },
         "logoUrl": {
           "name": "logoUrl",

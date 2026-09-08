@@ -80,9 +80,9 @@ async function main(): Promise<void> {
   const info = await transport.sendMail({
     from,
     to,
-    subject: 'SupportHub Microsoft 365 SMTP Test',
+    subject: 'SupportHero Microsoft 365 SMTP Test',
     text: 'This is a test email sent through Microsoft 365 SMTP using OAuth 2.0 (XOAUTH2).',
-    html: '<h2>SupportHub Email Test</h2><p>This is a test email sent through Microsoft 365 SMTP with OAuth 2.0.</p>',
+    html: '<h2>SupportHero Email Test</h2><p>This is a test email sent through Microsoft 365 SMTP with OAuth 2.0.</p>',
   })
 
   console.log(`SUCCESS: Microsoft 365 SMTP email sent (${info.messageId}).`)
