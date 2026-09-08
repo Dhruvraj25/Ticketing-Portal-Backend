@@ -7,6 +7,8 @@ import { ticketResolvedTemplate } from '../src/services/email/templates/ticket-r
 import { loginCredentialsTemplate } from '../src/services/email/templates/login-credentials'
 import { customerCreatedTemplate } from '../src/services/email/templates/customer-created'
 import { accountActivatedTemplate } from '../src/services/email/templates/account-activated'
+import { managerReviewTemplate } from '../src/services/email/templates/manager-review'
+import { reworkTemplate } from '../src/services/email/templates/rework'
 import { getBranding } from '../src/services/email/templates/base.template'
 
 const PROD_URL = 'https://portal.example.com'
@@ -25,6 +27,8 @@ test('email: templates use Support Hero branding, never SupportHub', () => {
     loginCredentialsTemplate({ userEmail: 'a@b.com', initialPassword: 'pw', loginUrl: `${PROD_URL}/sign-in` }, branding),
     customerCreatedTemplate({ customerName: 'Acme', customerEmail: 'a@b.com', createdBy: 'Admin', portalUrl: `${PROD_URL}/sign-in` }, branding),
     accountActivatedTemplate({ userName: 'Bob', userEmail: 'b@c.com', loginUrl: `${PROD_URL}/sign-in` }, branding),
+    managerReviewTemplate({ ticketNumber: 'TKT-1', ticketTitle: 'Bug', resolvedByName: 'Dana Dev', ticketLink: `${PROD_URL}/dashboard/tickets/1` }, branding),
+    reworkTemplate({ ticketNumber: 'TKT-1', ticketTitle: 'Bug', requestedByName: 'Mary Manager', revisionNotes: 'Please fix the login flow', ticketLink: `${PROD_URL}/dashboard/tickets/1` }, branding),
   ]
 
   for (const html of samples) {
@@ -55,4 +59,36 @@ test('email: awaiting client review template uses the configured URL', () => {
     branding,
   )
   assert.ok(html.includes(`${PROD_URL}/dashboard/tickets/43`))
+})
+
+// ─── Manager Review / Rework — known-issue fix: templates now exist ───────
+
+test('email: manager review template renders recipient-relevant content and the configured URL', () => {
+  const html = managerReviewTemplate(
+    { ticketNumber: 'TKT-7', ticketTitle: 'Login bug', resolvedByName: 'Dana Dev', ticketLink: `${PROD_URL}/dashboard/tickets/7` },
+    branding,
+  )
+  assert.ok(html.includes(`${PROD_URL}/dashboard/tickets/7`), 'must link to the configured frontend URL')
+  assert.ok(html.includes('TKT-7'))
+  assert.ok(html.includes('Dana Dev'), 'must name who resolved it')
+  assert.ok(html.includes('Support Hero'))
+  assert.ok(!html.includes('SupportHub'))
+  assert.ok(!html.includes('localhost'))
+})
+
+test('email: rework template renders the manager\'s instructions and the configured URL, never the client', () => {
+  const html = reworkTemplate(
+    { ticketNumber: 'TKT-8', ticketTitle: 'Signup form', requestedByName: 'Mary Manager', revisionNotes: 'Validate the email field before submit', ticketLink: `${PROD_URL}/dashboard/tickets/8` },
+    branding,
+  )
+  assert.ok(html.includes(`${PROD_URL}/dashboard/tickets/8`), 'must link to the configured frontend URL')
+  assert.ok(html.includes('TKT-8'))
+  assert.ok(html.includes('Mary Manager'), 'must name the manager who requested rework')
+  assert.ok(html.includes('Validate the email field before submit'), 'must include the rework notes')
+  assert.ok(html.includes('Support Hero'))
+  assert.ok(!html.includes('SupportHub'))
+  assert.ok(!html.includes('localhost'))
+  // This template is developer-facing only — it must never claim to be from
+  // or addressed to the client, or reference client-approval language.
+  assert.ok(!html.toLowerCase().includes('client approval'))
 })

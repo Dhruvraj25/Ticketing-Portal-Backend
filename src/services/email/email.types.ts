@@ -18,6 +18,8 @@ export type EmailEventType =
   | 'ticket_reassigned'
   | 'revision_requested'
   | 'ticket_revision_requested'
+  | 'manager_review'
+  | 'rework'
   | 'estimate_requested'
   | 'additional_hours_approved'
   | 'additional_hours_rejected'
@@ -291,6 +293,29 @@ export interface RevisionRequestedTemplateData extends BaseTemplateData {
   ticketLink: string
 }
 
+// ─── Manager Review (internal — sent to the project manager/admin) ────────
+// Fires when a developer marks a ticket resolved: the ticket now needs a
+// manager's Forward-to-Client / Rework decision before the client sees it.
+
+export interface ManagerReviewTemplateData extends BaseTemplateData {
+  ticketNumber: string
+  ticketTitle: string
+  resolvedByName: string
+  ticketLink: string
+}
+
+// ─── Rework (internal — sent to the assigned developer) ───────────────────
+// Fires when a manager/admin sends a resolved ticket back for Rework. Distinct
+// from Revision Requested (client-initiated) — see request_for_revision.
+
+export interface ReworkTemplateData extends BaseTemplateData {
+  ticketNumber: string
+  ticketTitle: string
+  requestedByName: string
+  revisionNotes: string
+  ticketLink: string
+}
+
 // ─── Estimate Requested (to client) ───────────────────────────────────────
 
 export interface EstimateRequestedTemplateData extends BaseTemplateData {
@@ -431,6 +456,8 @@ export type EmailTemplateData =
   | TicketReopenedTemplateData
   | TicketReassignedTemplateData
   | RevisionRequestedTemplateData
+  | ManagerReviewTemplateData
+  | ReworkTemplateData
   | EstimateRequestedTemplateData
   | AdditionalHoursApprovedTemplateData
   | WalletEmptyTemplateData

@@ -29,6 +29,8 @@ import {
   sendTicketReopened,
   sendTicketReassigned,
   sendRevisionRequested,
+  sendManagerReview,
+  sendRework,
   sendEstimateRequested,
   sendAdditionalHoursApproved,
   sendWelcomeEmail,
@@ -292,6 +294,12 @@ case 'account_activated':
     case 'ticket_revision_requested':
     case 'revision_requested':
       sendRevisionRequested(to, data, opts)
+      break
+    case 'manager_review':
+      sendManagerReview(to, data, opts)
+      break
+    case 'rework':
+      sendRework(to, data, opts)
       break
     case 'estimate_requested':
       sendEstimateRequested(to, data, opts)

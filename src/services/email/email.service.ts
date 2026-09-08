@@ -30,6 +30,8 @@ import type {
   TicketReopenedTemplateData,
   TicketReassignedTemplateData,
   RevisionRequestedTemplateData,
+  ManagerReviewTemplateData,
+  ReworkTemplateData,
   EstimateRequestedTemplateData,
   AdditionalHoursApprovedTemplateData,
   WalletEmptyTemplateData,
@@ -60,6 +62,8 @@ import { ticketClosedTemplate } from './templates/ticket-closed'
 import { ticketReopenedTemplate } from './templates/ticket-reopened'
 import { ticketReassignedTemplate } from './templates/ticket-reassigned'
 import { revisionRequestedTemplate } from './templates/revision-requested'
+import { managerReviewTemplate } from './templates/manager-review'
+import { reworkTemplate } from './templates/rework'
 import { estimateRequestedTemplate } from './templates/estimate-requested'
 import { additionalHoursApprovedTemplate } from './templates/additional-hours-approved'
 import { walletEmptyTemplate } from './templates/wallet-empty'
@@ -452,6 +456,56 @@ export function sendRevisionRequested(
     subject: `[Revision Requested #${data.ticketNumber}] ${data.ticketTitle}`,
     html,
     eventType: 'revision_requested',
+    cc: options?.cc,
+    immediate: options?.immediate,
+  })
+}
+
+// ─── Manager Review (internal) ─────────────────────────────────────────────
+
+/**
+ * Send "Manager Review" notification to the project manager/admin when a
+ * developer marks a ticket resolved. Internal only — never sent to the client.
+ */
+export function sendManagerReview(
+  to: string | string[],
+  data: ManagerReviewTemplateData,
+  options?: { immediate?: boolean; cc?: string | string[]; branding?: BrandingConfig },
+): string | null {
+  const branding = resolveBranding(options?.branding)
+  const html = managerReviewTemplate(data, branding)
+
+  return send({
+    to,
+    subject: `[Review Needed #${data.ticketNumber}] ${data.ticketTitle}`,
+    html,
+    eventType: 'manager_review',
+    cc: options?.cc,
+    immediate: options?.immediate,
+  })
+}
+
+// ─── Rework (internal) ──────────────────────────────────────────────────────
+
+/**
+ * Send "Rework Requested" notification to the assigned developer when a
+ * manager/admin sends a resolved ticket back for changes. Internal only —
+ * distinct from Revision Requested (client-initiated) and never sent to the
+ * client.
+ */
+export function sendRework(
+  to: string | string[],
+  data: ReworkTemplateData,
+  options?: { immediate?: boolean; cc?: string | string[]; branding?: BrandingConfig },
+): string | null {
+  const branding = resolveBranding(options?.branding)
+  const html = reworkTemplate(data, branding)
+
+  return send({
+    to,
+    subject: `[Rework Requested #${data.ticketNumber}] ${data.ticketTitle}`,
+    html,
+    eventType: 'rework',
     cc: options?.cc,
     immediate: options?.immediate,
   })
@@ -870,6 +924,8 @@ export const emailService = {
   sendTicketReopened,
   sendTicketReassigned,
   sendRevisionRequested,
+  sendManagerReview,
+  sendRework,
   sendEstimateRequested,
   sendAdditionalHoursApproved,
   sendWelcomeEmail,
