@@ -40,28 +40,52 @@ const graphClient = Client.initWithMiddleware({
         ? params.to
         : [params.to];
 
-    await graphClient
-        .api(`/users/${senderEmail}/sendMail`)
-        .post({
-        message: {
-            subject: params.subject,
-            body: {
-            contentType: params.html ? "HTML" : "Text",
-            content: params.html || params.text || "",
-            },
-            toRecipients: recipients.map((email) => ({
-            emailAddress: {
-                address: email,
-            },
-            })),
-        },
-        saveToSentItems: true,
-        });
+    try {
+      // Microsoft Graph's /sendMail endpoint returns HTTP 202 Accepted with
+      // an EMPTY response body by design — there is no message resource, and
+      // therefore no real Graph message ID to capture here. A resolved
+      // promise means Graph ACCEPTED the request for delivery; it does not
+      // by itself prove the message reached the recipient's mailbox (that
+      // happens asynchronously inside Microsoft 365, outside this API call).
+      await graphClient
+          .api(`/users/${senderEmail}/sendMail`)
+          .post({
+          message: {
+              subject: params.subject,
+              body: {
+              contentType: params.html ? "HTML" : "Text",
+              content: params.html || params.text || "",
+              },
+              toRecipients: recipients.map((email) => ({
+              emailAddress: {
+                  address: email,
+              },
+              })),
+          },
+          saveToSentItems: true,
+          });
 
-  return {
-    success: true,
-    messageId: "graph-api-sent",
-  };
+      console.log(
+        `[Email][Microsoft Graph] Accepted by Graph (HTTP 202) for ${recipients.join(', ')} — subject: ${params.subject}`
+      );
+
+      return {
+        success: true,
+        // Not a real Microsoft Graph message identifier — sendMail returns no
+        // body to derive one from. This only records that Graph accepted the
+        // request, distinct from confirmed mailbox delivery (see comment above).
+        messageId: "graph-accepted-no-id-returned",
+      };
+    } catch (error) {
+      // Surface the REAL Graph error (never swallow it) so a failed send is
+      // never mistaken for success by the queue/caller.
+      const err = error as { statusCode?: number; code?: string; message?: string };
+      console.error(
+        `[Email][Microsoft Graph] sendMail REJECTED by Graph for ${recipients.join(', ')} — ` +
+        `status: ${err?.statusCode ?? 'unknown'}, code: ${err?.code ?? 'unknown'}, message: ${err?.message ?? String(error)}`
+      );
+      throw error;
+    }
 }
 export const microsoftGraphProvider: EmailProvider = {
   name: "microsoft-graph",
