@@ -1,5 +1,6 @@
 import 'dotenv/config'
 
+import { createHash } from 'crypto'
 import { app } from './app'
 import { initTransporter } from './services/email/email.transporter'
 import { getActiveProviderName } from './services/email/email.provider'
@@ -15,7 +16,30 @@ import { logMicrosoftSmtpStatus } from './services/email/providers/microsoft-smt
 
 const PORT = parseInt(process.env.PORT || '4000', 10)
 
+/**
+ * Logs whether BETTER_AUTH_SECRET is configured, its length, and a SHA-256
+ * hash PREFIX (12 hex chars — not reversible to the secret) — never the
+ * secret itself. Run this same check against the Frontend's own runtime
+ * (e.g. via a matching startup log there) and compare the two lines by eye:
+ * identical hash prefix + identical length means the two services are
+ * signing/verifying session cookies with the same secret. This exists
+ * specifically so a secret mismatch between two separately-deployed
+ * services (Vercel + Railway) is visible in each service's OWN production
+ * logs without either service needing access to the other's environment.
+ */
+function logAuthConfig() {
+  const secret = process.env.BETTER_AUTH_SECRET
+  if (!secret) {
+    console.log('[AuthConfig] secretConfigured=false')
+    return
+  }
+  const hashPrefix = createHash('sha256').update(secret).digest('hex').slice(0, 12)
+  console.log(`[AuthConfig] secretConfigured=true secretLength=${secret.length} secretHashPrefix=${hashPrefix}`)
+}
+
 async function startServer() {
+  logAuthConfig()
+
   // ─── Initialize Email System ────────────────────────────────────────────
 
   await initTransporter()
