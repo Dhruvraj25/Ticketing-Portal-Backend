@@ -185,7 +185,9 @@ export function getWebhookStatus() {
     mockMode: !config.enabled,
     ready: isWebhookReady(config),
     webhookConfigured: !!config.webhookUrl,
-    webhookUrlPreview: config.webhookUrl ? config.webhookUrl.substring(0, 40) + '...' : undefined,
+    // Never expose any portion of the webhook URL (it carries an embedded
+    // signature that authenticates the call, equivalent to a secret) — a
+    // boolean is sufficient for the admin status page.
   }
 }
 

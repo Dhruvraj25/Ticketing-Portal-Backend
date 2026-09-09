@@ -71,7 +71,9 @@ export function validateConfig(config: TeamsConfig): TeamsValidationReport {
       severity,
       message: validation.message,
       passed: validation.passed,
-      value: value ? value.substring(0, 50) + '...' : undefined,
+      // Never expose any portion of the webhook URL — it carries an embedded
+      // signature that authenticates the call, equivalent to a secret.
+      value: value ? '(configured)' : undefined,
     })
   }
 

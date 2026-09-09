@@ -12,7 +12,7 @@ import type { AuthenticatedRequest } from '../middleware/auth'
 import { sendTeamsNotification, sendTestMessage } from '../services/teams/teams.service'
 import { testMessageCard } from '../services/teams/adaptive-cards'
 import { TEAMS_LOG_PREFIX } from '../services/teams/teams.constants'
-import { getWebhookStatus, loadTeamsConfig, sendWebhookMessage } from '../services/teams/teams-webhook-client'
+import { loadTeamsConfig, sendWebhookMessage } from '../services/teams/teams-webhook-client'
 import { getQueueStats, getQueueEntries, clearQueue } from '../services/teams/teams-queue'
 import { teamsMonitor } from '../services/teams/teams-monitor'
 import { teamsConfigValidator } from '../services/teams/teams-config-validator'
@@ -186,17 +186,13 @@ router.post('/test', requireAuth, requireInternalStaff, async (_req: Authenticat
 
 router.get('/status', requireAuth, requireInternalStaff, (_req: AuthenticatedRequest | any, res: Response) => {
   const config = loadTeamsConfig()
-  const webhookStatus = getWebhookStatus()
   const qStats = getQueueStats()
   const healthStatus = teamsMonitor.getHealthStatus(
     { enabled: config.enabled, webhookUrl: config.webhookUrl },
     qStats.currentDepth,
   )
 
-  return res.json({
-    ...healthStatus,
-    webhookUrlPreview: webhookStatus.webhookUrlPreview,
-  })
+  return res.json(healthStatus)
 })
 
 // ─── Configuration Validation ──────────────────────────────────────────────
