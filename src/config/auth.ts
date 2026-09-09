@@ -6,6 +6,48 @@ import { and, eq } from 'drizzle-orm'
 import { getFrontendUrl } from '../utils/frontend-url'
 import { normalizeEmail } from '../utils/email'
 
+// ─── Session Cookie Name Resolution ────────────────────────────────────────
+// ROOT-CAUSE FIX (verified end-to-end, see audit):
+//
+// The session cookie is CREATED by the Frontend's Better Auth instance (Next.js
+// on Vercel, https baseURL) and is therefore named
+// "__Secure-better-auth.session_token". This Backend instance only VALIDATES
+// that cookie. Better Auth derives the "__Secure-" prefix from THIS instance's
+// own baseURL scheme — which falls back to `http://localhost:${PORT}` when
+// BETTER_AUTH_URL is unset (the default on Railway). An http baseURL yields the
+// UNPREFIXED name "better-auth.session_token", so the backend looks for a
+// cookie the browser never sent: every session lookup returns null → 401
+// "session_invalid" while the Railway log shows hasCookie=true.
+//
+// Fix: pin useSecureCookies to the FRONTEND's scheme (not this instance's
+// baseURL). In production the frontend is always https (Vercel) → secure
+// prefix → matches the cookie the browser holds. In local dev the frontend is
+// http://localhost:3000 → unprefixed → matches the dev cookie. Reproduced
+// with better-auth@1.6.14: same secret + same DB, http baseURL → NULL,
+// https baseURL → SUCCESS.
+const AUTH_FRONTEND_URL = getFrontendUrl()
+const AUTH_USE_SECURE_COOKIES =
+  AUTH_FRONTEND_URL.startsWith('https://') || process.env.NODE_ENV === 'production'
+
+console.log(
+  '[AuthConfig] ' +
+  `frontendUrl=${AUTH_FRONTEND_URL} ` +
+  `sessionCookieName=${AUTH_USE_SECURE_COOKIES ? '__Secure-better-auth.session_token' : 'better-auth.session_token'} ` +
+  `baseURL=${process.env.BETTER_AUTH_URL || `http://localhost:${process.env.PORT || 4000}`}`,
+)
+// Database fingerprint — compare with Frontend's [DB] log to confirm same database
+try {
+  const dbUrl = process.env.DATABASE_URL
+  if (dbUrl) {
+    const url = new URL(dbUrl)
+    console.log(`[DB] DATABASE_HOST=${url.hostname} DATABASE_NAME=${url.pathname.replace('/', '')}`)
+  } else {
+    console.log('[DB] DATABASE_URL=MISSING')
+  }
+} catch {
+  console.log('[DB] DATABASE_URL=INVALID')
+}
+
 export const auth = betterAuth({
   database: pool,
   baseURL: process.env.BETTER_AUTH_URL || `http://localhost:${process.env.PORT || 4000}`,
@@ -37,6 +79,11 @@ export const auth = betterAuth({
   session: {
     expiresIn: 60 * 60 * 24 * 7,
     updateAge: 60 * 60 * 24,
+  },
+  // See AUTH_USE_SECURE_COOKIES above — must mirror the FRONTEND instance's
+  // cookie name so sessions issued by the frontend validate here.
+  advanced: {
+    useSecureCookies: AUTH_USE_SECURE_COOKIES,
   },
   databaseHooks: {
     user: {

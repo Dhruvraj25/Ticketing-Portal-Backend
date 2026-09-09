@@ -252,7 +252,9 @@ async function sendEmailNotification(
       emailTicketResolved(to, {
         ticketNumber: payload.ticketNumber || '',
         ticketTitle: payload.ticketTitle || '',
-        resolvedBy: payload.createdBy || '',
+        // CLIENT PRIVACY: this email is client-only (recipient: Client).
+        // resolvedBy carries the internal manager/PM identity — it MUST NOT
+        // be rendered to the client (see TicketResolvedTemplateData).
         resolutionSummary: payload.message,
         ticketLink: payload.url || '',
       }, opts)

@@ -226,9 +226,25 @@ async function sendWithRetry(entry: TeamsQueueEntry): Promise<boolean> {
     success = result
   }
 
-  if (!success && entry.retryCount < entry.maxRetries) {
-    const delay = TEAMS_RETRY.INITIAL_DELAY_MS * Math.pow(TEAMS_RETRY.BACKOFF_MULTIPLIER, entry.retryCount)
-    console.log(TEAMS_QUEUE_PREFIX + ' Retrying ' + entry.id + ' in ' + delay + 'ms...')
+  if (!success) {
+    // ROOT-CAUSE FIX: sendWithRetry owns the retry budget. The previous
+    // version recursed while `entry.retryCount < entry.maxRetries` but never
+    // incremented retryCount inside the recursion, so a webhook that kept
+    // returning an error (sendWebhookMessage resolves with {success:false} —
+    // it never throws) retried forever with growing backoff. isProcessing
+    // stayed true, processQueue() returned 0 for every later call, and the
+    // queue was PERMANENTLY STUCK: all subsequent Teams notifications were
+    // enqueued but never delivered. Count the attempt here and terminate.
+    entry.retryCount++
+    if (entry.retryCount >= entry.maxRetries) {
+      // The outer processQueue loop logs the permanent failure and removes
+      // the entry from the queue — return false to hand control back.
+      return false
+    }
+    const delay = TEAMS_RETRY.INITIAL_DELAY_MS * Math.pow(TEAMS_RETRY.BACKOFF_MULTIPLIER, entry.retryCount - 1)
+    console.log(
+      TEAMS_QUEUE_PREFIX + ' Retrying ' + entry.id + ' in ' + delay + 'ms (attempt ' + (entry.retryCount + 1) + '/' + entry.maxRetries + ')...',
+    )
     await sleep(delay)
     return sendWithRetry(entry)
   }

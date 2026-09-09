@@ -22,6 +22,7 @@ import devEmailRoutes from "./routes/dev-email"
 import emailNotificationRoutes from "./routes/email-notification"
 import teamsNotificationRoutes from "./routes/teams-notification"
 import bootstrapRouter from './routes/bootstrap'
+import authDiagnosticsRouter from './routes/auth-diagnostics'
 
 export const app = express()
 
@@ -57,6 +58,9 @@ app.use('/api/reports', routeTimingMiddleware('Reports'), reportsRouter)
 app.use('/api/attachments', routeTimingMiddleware('Attachments'), attachmentsRouter)
 app.use('/api/onboarding', routeTimingMiddleware('Onboarding'), onboardingRouter)
 app.use("/api/dev", devEmailRoutes)
+
+// ─── Auth Diagnostics (safe fingerprints, no secrets) ────────────────────
+app.use('/api/auth-diagnostics', authDiagnosticsRouter)
 console.log("✅ Dev Email Route Registered");
 
 // ─── Email Notifications (fire-and-forget from frontend actions) ──────────

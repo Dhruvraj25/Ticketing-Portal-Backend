@@ -87,12 +87,11 @@ export async function processQueue(): Promise<number> {
   let processed = 0
 
   try {
-    const provider = getProvider()
     const items = [...queue]
 
     for (const entry of items) {
       try {
-        const result = await sendWithRetry(provider.send(entry.params), entry)
+        const result = await sendWithRetry(entry)
 
         if (result.success) {
           removeFromQueue(entry.id)
@@ -201,17 +200,26 @@ function removeFromQueue(id: string): void {
   }
 }
 
-async function sendWithRetry(
-  sendPromise: Promise<SendEmailResult>,
-  entry: EmailQueueEntry,
-): Promise<SendEmailResult> {
-  const result = await sendPromise
+async function sendWithRetry(entry: EmailQueueEntry): Promise<SendEmailResult> {
+  const result = await getProvider().send(entry.params)
 
-  if (!result.success && entry.retryCount < entry.maxRetries) {
-    const delay = EMAIL_RETRY.INITIAL_DELAY_MS * Math.pow(EMAIL_RETRY.BACKOFF_MULTIPLIER, entry.retryCount)
-    console.log(`${EMAIL_QUEUE_PREFIX} Retrying ${entry.id} in ${delay}ms...`)
+  if (!result.success) {
+    // ROOT-CAUSE FIX: sendWithRetry owns the retry budget. The previous
+    // version recursed while `entry.retryCount < entry.maxRetries` but never
+    // incremented retryCount inside the recursion, so a provider that
+    // RESOLVES with {success:false} (e.g. Resend, which catches its own
+    // errors) retried forever with growing backoff. isProcessing stayed true,
+    // processQueue() returned 0 for every later call, and the queue was
+    // PERMANENTLY STUCK: all subsequent emails were enqueued but never sent.
+    // Count the attempt here and terminate.
+    entry.retryCount++
+    if (entry.retryCount >= entry.maxRetries) {
+      return result
+    }
+    const delay = EMAIL_RETRY.INITIAL_DELAY_MS * Math.pow(EMAIL_RETRY.BACKOFF_MULTIPLIER, entry.retryCount - 1)
+    console.log(`${EMAIL_QUEUE_PREFIX} Retrying ${entry.id} in ${delay}ms (attempt ${entry.retryCount + 1}/${entry.maxRetries})...`)
     await sleep(delay)
-    return sendWithRetry(getProvider().send(entry.params), entry)
+    return sendWithRetry(entry)
   }
 
   return result

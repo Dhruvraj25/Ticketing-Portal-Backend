@@ -6,15 +6,18 @@ import { join } from 'node:path'
 // ============================================================================
 // Microsoft Graph email provider — delivery diagnostic regression
 // ============================================================================
-// The provider constructs its ClientSecretCredential / Graph Client at
-// MODULE LOAD TIME from process.env.MICROSOFT_*! — importing it directly
-// under node:test without those vars populated (this test runner does not
-// load .env) would crash at import. So, matching this repo's established
-// convention for config-shaped concerns (see tests/frontend-url.test.ts's
-// sibling suites), these are source-level regression guards proving the
-// ACTUAL current file content — verified end-to-end separately via
-// scripts/diagnose-graph-email.ts against real Azure credentials (see the
-// task report: token acquired, aud=https://graph.microsoft.com, Mail.Send
+// ROOT-CAUSE FIX: the provider previously constructed its
+// ClientSecretCredential / Graph Client at MODULE LOAD TIME from
+// process.env.MICROSOFT_*! — so ANY missing MICROSOFT_* variable crashed the
+// entire backend on boot (CredentialUnavailableError: tenantId is a required
+// parameter) even when EMAIL_PROVIDER was console/resend/microsoft-smtp.
+// The credential and client are now built LAZILY inside getGraphClient(),
+// only when this provider is actually selected and used.
+//
+// These are source-level regression guards proving the ACTUAL current file
+// content (this test runner does not load .env), verified end-to-end
+// separately via scripts/diagnose-graph-email.ts against real Azure
+// credentials (token acquired, aud=https://graph.microsoft.com, Mail.Send
 // present in the app-only token's roles claim, and a real sendMail POST to
 // the configured sender's own mailbox resolved without throwing).
 
@@ -70,12 +73,26 @@ test('MICROSOFT_TENANT_ID/CLIENT_ID/CLIENT_SECRET/SENDER_EMAIL are read from env
 })
 
 test('the Graph client authenticates via ClientSecretCredential with the exact Graph .default scope', () => {
-  assert.match(SRC, /new ClientSecretCredential\(\s*tenantId,\s*clientId,\s*clientSecret\s*\)/)
+  assert.match(SRC, /new ClientSecretCredential\(\s*config\.tenantId,\s*config\.clientId,\s*config\.clientSecret,\s*\)/)
   assert.match(SRC, /"https:\/\/graph\.microsoft\.com\/\.default"/)
 })
 
-test('the actual send targets POST /users/{senderEmail}/sendMail with subject/body/toRecipients', () => {
-  assert.match(SRC, /\.api\(`\/users\/\$\{senderEmail\}\/sendMail`\)/)
+test('credential + Graph client construction is LAZY — never at module load (boot-crash fix)', () => {
+  // The old code built `new ClientSecretCredential(...)` at the top level of
+  // the module, so a missing MICROSOFT_* var crashed the whole backend at
+  // import. The credential must now be created inside getGraphClient(),
+  // which only runs when this provider is actually used.
+  const moduleTop = SRC.slice(0, SRC.indexOf('function getGraphConfig'))
+  assert.doesNotMatch(moduleTop, /new ClientSecretCredential\(/, 'no credential may be constructed at module load')
+  const getClientFn = SRC.slice(SRC.indexOf('function getGraphClient'), SRC.indexOf('export async function sendMicrosoftGraphEmail'))
+  assert.match(getClientFn, /new ClientSecretCredential\(/, 'the credential is built lazily inside getGraphClient()')
+})
+
+test('the actual send targets POST /users/{sender}/sendMail with subject/body/toRecipients', () => {
+  // The sender is MICROSOFT_SENDER_EMAIL — resolved once when the lazy client
+  // is built and reused for every send (`from` = the configured sender).
+  assert.match(SRC, /\.api\(`\/users\/\$\{from\}\/sendMail`\)/)
+  assert.match(SRC, /const from = senderEmail!/)
   assert.match(SRC, /\.post\(\{/)
   assert.match(SRC, /subject: params\.subject/)
   assert.match(SRC, /toRecipients: recipients\.map/)
