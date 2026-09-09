@@ -3,7 +3,7 @@
 // ============================================================================
 
 /**
- * Supported email event types for the SupportHub application.
+ * Supported email event types for the Support Hero application.
  * Each event maps to a specific template and has well-defined data requirements.
  */
 export type EmailEventType =
@@ -205,7 +205,12 @@ export interface AdditionalHoursRejectedTemplateData extends BaseTemplateData {
 export interface TicketResolvedTemplateData extends BaseTemplateData {
   ticketNumber: string
   ticketTitle: string
-  resolvedBy: string
+  /**
+   * The internal manager/PM's name. This template is client-only — omit this
+   * field when building the client's templateData so the manager's identity
+   * is never rendered to the client (see CLIENT PRIVACY audit fix).
+   */
+  resolvedBy?: string
   resolutionSummary?: string
   ticketLink: string
 }
@@ -394,7 +399,13 @@ export interface RevisionApprovedTemplateData extends BaseTemplateData {
   ticketNumber: string
   ticketTitle: string
   revisionNumber: number
-  approvedBy: string
+  /**
+   * The internal manager/admin's name. This event is sent to BOTH the
+   * (often-client) requester and the assigned developer — omit this field
+   * for the client/requester recipient's templateData so the approver's
+   * identity is never rendered to the client (see CLIENT PRIVACY audit fix).
+   */
+  approvedBy?: string
   ticketLink: string
 }
 

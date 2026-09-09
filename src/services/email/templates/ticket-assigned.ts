@@ -13,7 +13,11 @@ export function ticketAssignedTemplate(
 ): string {
   const content =
     emailHeading('New Ticket Assigned') +
-    emailParagraph(`A ticket has been assigned to ${data.developerName ? `<strong>${escapeHtml(data.developerName)}</strong>` : 'you'}.`) +
+    // developerName is intentionally omitted from the CLIENT recipient's copy
+    // (see Frontend/app/actions/tickets/update.ts's assignTicket) — the
+    // fallback text below must stay client-safe (never "you", which would
+    // wrongly imply the client themselves was assigned).
+    emailParagraph(`A ticket has been assigned to ${data.developerName ? `<strong>${escapeHtml(data.developerName)}</strong>` : 'a developer on our support team'}.`) +
     emailFieldTable(
       emailFieldRow('Ticket', `#${escapeHtml(data.ticketNumber)}`) +
       emailFieldRow('Title', escapeHtml(data.ticketTitle)) +

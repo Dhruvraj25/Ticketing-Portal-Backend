@@ -230,6 +230,18 @@ async function sendEmailNotification(
   if (data.walletLink) {
     data.walletLink = data.walletLink.replace(/^https?:\/\/[^\/]+/, FRONTEND_URL)
   }
+  if (data.loginUrl) {
+    data.loginUrl = data.loginUrl.replace(/^https?:\/\/[^\/]+/, FRONTEND_URL)
+  }
+  if (data.resetLink) {
+    data.resetLink = data.resetLink.replace(/^https?:\/\/[^\/]+/, FRONTEND_URL)
+  }
+  if (data.adminUrl) {
+    data.adminUrl = data.adminUrl.replace(/^https?:\/\/[^\/]+/, FRONTEND_URL)
+  }
+  if (data.projectLink) {
+    data.projectLink = data.projectLink.replace(/^https?:\/\/[^\/]+/, FRONTEND_URL)
+  }
 
   switch (eventType) {
     case 'ticket_created':

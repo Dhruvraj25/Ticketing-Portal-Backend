@@ -11,13 +11,17 @@ export function ticketResolvedTemplate(
   data: TicketResolvedTemplateData,
   branding?: BrandingConfig,
 ): string {
+  // This template is client-only (sent when a manager forwards a resolved
+  // ticket for client review) — resolvedBy is the internal manager/PM's name
+  // and MUST NOT be rendered to the client. It stays optional so an internal
+  // caller could still supply it if this template is ever reused elsewhere.
   const content =
     emailHeading('Ticket Ready for Review') +
-    emailParagraph(`Your ticket has been resolved by <strong>${escapeHtml(data.resolvedBy)}</strong> and is ready for your review.`) +
+    emailParagraph(`Your ticket has been resolved${data.resolvedBy ? ` by <strong>${escapeHtml(data.resolvedBy)}</strong>` : ''} and is ready for your review.`) +
     emailFieldTable(
       emailFieldRow('Ticket', `#${escapeHtml(data.ticketNumber)}`) +
       emailFieldRow('Title', escapeHtml(data.ticketTitle)) +
-      emailFieldRow('Resolved By', escapeHtml(data.resolvedBy)) +
+      (data.resolvedBy ? emailFieldRow('Resolved By', escapeHtml(data.resolvedBy)) : '') +
       (data.resolutionSummary ? emailFieldRow('Resolution', escapeHtml(data.resolutionSummary)) : ''),
     ) +
     emailButton('Review Ticket', data.ticketLink, branding)

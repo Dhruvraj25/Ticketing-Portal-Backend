@@ -12,9 +12,13 @@ export function revisionApprovedTemplate(
   data: RevisionApprovedTemplateData,
   branding?: BrandingConfig,
 ): string {
+  // approvedBy is the internal manager/admin's name — this template goes to
+  // BOTH the (often-client) requester and the assigned developer, so the
+  // caller omits approvedBy for the client/requester copy and it stays
+  // optional here. Internal recipients (developer) keep receiving the name.
   const content =
     emailHeading('Revision Approved') +
-    emailParagraph(`Revision <strong>#${escapeHtml(String(data.revisionNumber))}</strong> for the ticket below has been approved by ${escapeHtml(data.approvedBy)}.`) +
+    emailParagraph(`Revision <strong>#${escapeHtml(String(data.revisionNumber))}</strong> for the ticket below has been approved${data.approvedBy ? ` by ${escapeHtml(data.approvedBy)}` : ''}.`) +
     emailFieldTable(
       emailFieldRow('Ticket', `#${escapeHtml(data.ticketNumber)}`) +
       emailFieldRow('Title', escapeHtml(data.ticketTitle)) +
