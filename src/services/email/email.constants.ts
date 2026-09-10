@@ -89,3 +89,26 @@ export const EMAIL_QUEUE_PREFIX = '[Email Queue]'
 export const EMAIL_TRANSPORT_PREFIX = '[Email Transport]'
 export const EMAIL_TEMPLATE_PREFIX = '[Email Template]'
 export const MICROSOFT_SMTP_LOG_PREFIX = '[Email][Microsoft SMTP]'
+
+// ─── Microsoft Graph Error Code Mapping ────────────────────────────────────
+// Maps Graph HTTP status codes to safe, user-facing error messages.
+// NEVER expose Graph URLs, tokens, tenant IDs, or raw JSON to users.
+
+export const GRAPH_ERROR_MESSAGES: Record<number, string> = {
+  400: 'The email could not be sent because the request was invalid.',
+  401: 'The email service is not authorized to send this message. Please contact an administrator.',
+  403: 'The email service is not authorized to send this message. Please contact an administrator.',
+  404: 'The email could not be sent because the configured sender or recipient could not be found.',
+  429: 'The email service is temporarily busy. Please try again shortly.',
+  500: 'The email service is temporarily unavailable. Please try again later.',
+  502: 'The email service is temporarily unavailable. Please try again later.',
+  503: 'The email service is temporarily unavailable. Please try again later.',
+}
+
+/**
+ * Get a safe, user-facing error message for a Microsoft Graph error.
+ * Falls back to a generic message for unknown status codes.
+ */
+export function getGraphErrorMessage(statusCode: number): string {
+  return GRAPH_ERROR_MESSAGES[statusCode] || 'The email could not be sent. Please try again later.'
+}

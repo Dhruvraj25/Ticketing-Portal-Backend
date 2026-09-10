@@ -131,14 +131,22 @@ export async function sendMicrosoftGraphEmail(params: {
       messageId: "graph-accepted-no-id-returned",
     };
   } catch (error) {
-    // Surface the REAL Graph error (never swallow it) so a failed send is
-    // never mistaken for success by the queue/caller.
     const err = error as { statusCode?: number; code?: string; message?: string };
+    const status = err?.statusCode ?? 'unknown';
+    const code = err?.code ?? 'unknown';
+    const message = err?.message ?? String(error);
+
     console.error(
       `[Email][Microsoft Graph] sendMail REJECTED by Graph for ${recipients.join(', ')} — ` +
-      `status: ${err?.statusCode ?? 'unknown'}, code: ${err?.code ?? 'unknown'}, message: ${err?.message ?? String(error)}`,
+      `status: ${status}, code: ${code}, message: ${message}`,
     );
-    throw error;
+
+    // Throw a structured error with status code so callers can map
+    // to user-friendly messages without exposing Graph internals.
+    const graphError = new Error(message) as Error & { statusCode: number; provider: string };
+    graphError.statusCode = typeof status === 'number' ? status : 0;
+    graphError.provider = 'microsoft-graph';
+    throw graphError;
   }
 }
 

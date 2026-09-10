@@ -18,7 +18,7 @@
 
 import type { SendEmailParams, SendEmailResult, EmailQueueEntry, EmailEventType } from './email.types'
 import { getProvider } from './email.provider'
-import { EMAIL_QUEUE_PREFIX, EMAIL_LOG_PREFIX, EMAIL_RETRY } from './email.constants'
+import { EMAIL_QUEUE_PREFIX, EMAIL_LOG_PREFIX, EMAIL_RETRY, getGraphErrorMessage } from './email.constants'
 
 // ─── State ──────────────────────────────────────────────────────────────────
 
@@ -106,7 +106,16 @@ export async function processQueue(): Promise<number> {
         }
       } catch (err) {
         const error = err instanceof Error ? err : new Error('Unknown error')
-        console.error(`${EMAIL_QUEUE_PREFIX} Error processing ${entry.id}:`, error.message)
+        // Structured logging for Graph errors — no secrets or tokens
+        const statusCode = (err as any)?.statusCode
+        const provider = (err as any)?.provider
+        if (provider === 'microsoft-graph' && statusCode) {
+          console.error(
+            `${EMAIL_QUEUE_PREFIX} Graph error ${entry.id}: status=${statusCode} message=${getGraphErrorMessage(statusCode)}`
+          )
+        } else {
+          console.error(`${EMAIL_QUEUE_PREFIX} Error processing ${entry.id}:`, error.message)
+        }
 
         if (entry.retryCount >= entry.maxRetries) {
           removeFromQueue(entry.id)
@@ -204,14 +213,6 @@ async function sendWithRetry(entry: EmailQueueEntry): Promise<SendEmailResult> {
   const result = await getProvider().send(entry.params)
 
   if (!result.success) {
-    // ROOT-CAUSE FIX: sendWithRetry owns the retry budget. The previous
-    // version recursed while `entry.retryCount < entry.maxRetries` but never
-    // incremented retryCount inside the recursion, so a provider that
-    // RESOLVES with {success:false} (e.g. Resend, which catches its own
-    // errors) retried forever with growing backoff. isProcessing stayed true,
-    // processQueue() returned 0 for every later call, and the queue was
-    // PERMANENTLY STUCK: all subsequent emails were enqueued but never sent.
-    // Count the attempt here and terminate.
     entry.retryCount++
     if (entry.retryCount >= entry.maxRetries) {
       return result

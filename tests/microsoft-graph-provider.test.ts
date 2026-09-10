@@ -31,7 +31,7 @@ test('sendMicrosoftGraphEmail wraps the Graph call in try/catch and RE-THROWS on
   const catchIdx = SRC.indexOf('} catch (error) {')
   assert.ok(tryIdx !== -1 && catchIdx !== -1 && tryIdx < catchIdx, 'the Graph POST must be wrapped in try/catch')
   const catchBlock = SRC.slice(catchIdx, SRC.indexOf('\nexport const microsoftGraphProvider'))
-  assert.match(catchBlock, /throw error/, 'a failed Graph send must propagate as a rejected promise, never be swallowed into a false success')
+  assert.match(catchBlock, /throw graphError|throw error/, 'a failed Graph send must propagate as a rejected promise, never be swallowed into a false success')
 })
 
 test('a Graph send failure is logged with the REAL status/code/message, never a generic string', () => {
@@ -100,4 +100,12 @@ test('the actual send targets POST /users/{sender}/sendMail with subject/body/to
 
 test('EMAIL_PROVIDER stays microsoft-graph — provider name is not renamed away from the canonical value', () => {
   assert.match(SRC, /name: "microsoft-graph"/)
+})
+
+test('the structured Graph error includes statusCode and provider fields', () => {
+  const catchIdx = SRC.indexOf('} catch (error) {')
+  const catchBlock = SRC.slice(catchIdx, SRC.indexOf('\nexport const microsoftGraphProvider'))
+  assert.match(catchBlock, /graphError\.statusCode/, 'must set statusCode on the thrown error')
+  assert.match(catchBlock, /graphError\.provider/, 'must set provider on the thrown error')
+  assert.match(catchBlock, /provider = 'microsoft-graph'/, 'provider must be microsoft-graph')
 })
