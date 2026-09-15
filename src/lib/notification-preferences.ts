@@ -52,6 +52,8 @@ export const NOTIFICATION_EVENTS: NotificationEventDefinition[] = [
   { eventType: 'request_for_revision', label: 'Revision requested', group: 'Tickets', aliases: ['revision_requested', 'ticket_revision_requested'] },
   { eventType: 'ticket_closed', label: 'Ticket closed', group: 'Tickets' },
   { eventType: 'ticket_reopened', label: 'Ticket reopened', group: 'Tickets' },
+  { eventType: 'ticket_updated', label: 'Ticket updated', group: 'Tickets' },
+  { eventType: 'ticket_comment', label: 'Ticket comment', group: 'Tickets', aliases: ['ticket_comment_added', 'comment_added'] },
   // ── Estimates & hours (approval workflow) ───────────────────────────────
   { eventType: 'estimate_requested', label: 'Estimate awaiting approval', group: 'Approvals', aliases: [] },
   { eventType: 'estimate_approved', label: 'Estimate approved', group: 'Approvals' },
@@ -152,6 +154,34 @@ export function indexPreferences(
     map.set(key, row.enabled)
   }
   return map
+}
+
+/**
+ * Combine PROJECT preference rows (authoritative) with LEGACY CLIENT rows
+ * (inheritance fallback). A project row for a (channel,event) always wins; a
+ * key the project does not define keeps the client value. Keys absent from BOTH
+ * remain undefined so the built-in default applies — this is the safe,
+ * no-data-copy migration strategy: existing client settings keep working until a
+ * project explicitly overrides them.
+ */
+export function mergeProjectPreferenceOverClient(
+  projectRows: NotificationPreferenceRow[],
+  clientRows: NotificationPreferenceRow[],
+): Map<string, boolean> {
+  const merged = new Map<string, boolean>()
+  // Client (inheritance fallback) first…
+  for (const row of clientRows) {
+    const canonical = canonicalNotificationEvent(row.eventType)
+    if (!canonical) continue
+    merged.set(row.channel + ':' + canonical, row.enabled)
+  }
+  // …then PROJECT rows override.
+  for (const row of projectRows) {
+    const canonical = canonicalNotificationEvent(row.eventType)
+    if (!canonical) continue
+    merged.set(row.channel + ':' + canonical, row.enabled)
+  }
+  return merged
 }
 
 /**

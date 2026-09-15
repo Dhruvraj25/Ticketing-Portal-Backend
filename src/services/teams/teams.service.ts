@@ -10,8 +10,8 @@
 // ============================================================================
 
 import { TEAMS_LOG_PREFIX, EVENT_COLOR_MAP } from './teams.constants'
-import { loadTeamsConfig, sendWebhookMessageMock } from './teams-webhook-client'
 import { enqueue } from './teams-queue'
+import { resolveTeamsChannelForProject } from './teams-channel-resolver'
 import { teamsMonitor } from './teams-monitor'
 import {
   newTicketCard,
@@ -41,44 +41,56 @@ import type { TeamsNotificationPayload, TeamsSendResult, AdaptiveCard, AdaptiveC
 // ─── Core Notification Method ───────────────────────────────────────────────
 
 export function sendTeamsNotification(eventType: string, payload: TeamsNotificationPayload): void {
-  const config = loadTeamsConfig()
-  const mention = buildMention(payload)
-
-  if (!config.enabled) {
-    // Mock mode — log and simulate delivery
-    console.log('')
-    console.log('='.repeat(60))
-    console.log('Teams Notification (Mock Mode — Webhook)')
-    console.log('')
-    console.log('Event:    ' + (payload.title || eventType))
-    console.log('Project:  ' + (payload.projectName || 'N/A'))
-    console.log('Ticket:   ' + (payload.ticketId || 'N/A'))
-    console.log('Webhook:  Not configured')
-    console.log('Status:   Simulated')
-    console.log('='.repeat(60))
-    console.log('')
-
-    // Send via mock (non-queued for simplicity in dev mode)
-    const card = buildAdaptiveCard(eventType, payload)
-    if (card) {
-      const cardWithMention = mention ? addMentionToCard(card, mention) : card
-      sendWebhookMessageMock(config, '', '', cardWithMention as unknown as Record<string, unknown>, mention).catch(function () {})
-    }
-    return
-  }
-
   const card = buildAdaptiveCard(eventType, payload)
   if (!card) {
     console.warn(TEAMS_LOG_PREFIX + ' No card template for event: ' + eventType)
     return
   }
 
+  const mention = buildMention(payload)
   const cardWithMention = mention ? addMentionToCard(card, mention) : card
 
-  // Queue for delivery via webhook
-  enqueue(eventType as any, payload as unknown as Record<string, unknown>, cardWithMention, '', '', mention)
-  teamsMonitor.recordQueueEvent('Queued: ' + eventType)
-  console.log(TEAMS_LOG_PREFIX + ' Queued notification: ' + eventType)
+  // Resolve the PROJECT's Teams channel (falling back to the global webhook,
+  // then to mock mode) before handing off to the queue. The lookup is async but
+  // this function stays fire-and-forget — callers are never blocked.
+  //
+  // Only an EXPLICIT projectId triggers a DB lookup. Name-based resolution is
+  // done once at the boundary (routes/teams-notification.ts, which resolves a
+  // ticket number / unique project name to an id) — re-resolving by name here
+  // would add a query to every notification and could route a notification to
+  // the wrong project when names collide across clients.
+  resolveTeamsChannelForProject({ projectId: payload.projectId })
+    .then(function (resolved) {
+      // Queue for delivery — the queue owns retry/backoff and never re-resolves
+      // the destination, so each project's notification keeps its own channel
+      // across retries.
+      enqueue(
+        eventType as any,
+        payload as unknown as Record<string, unknown>,
+        cardWithMention,
+        payload.teamId || '',
+        payload.channelId || '',
+        mention,
+        resolved.webhookUrl,
+        resolved.projectId,
+        // The destination is authoritative: even when it resolved to nothing,
+        // the queue must not fall back to a global webhook the project opted out of.
+        true,
+      )
+      teamsMonitor.recordQueueEvent(
+        'Queued: ' + eventType +
+        ' [' + resolved.source + (resolved.projectId ? ' project=' + resolved.projectId : '') + ']',
+      )
+      // Never log the webhook URL (secret) — only the routing source.
+      console.log(
+        TEAMS_LOG_PREFIX + ' Queued notification: ' + eventType +
+        ' (route: ' + resolved.source + (resolved.projectId ? ', project ' + resolved.projectId : '') + ')',
+      )
+    })
+    .catch(function (err: Error) {
+      // Fire-and-forget: never surface a delivery problem to the business caller.
+      console.error(TEAMS_LOG_PREFIX + ' Failed to enqueue notification: ' + err.message)
+    })
 }
 
 /**

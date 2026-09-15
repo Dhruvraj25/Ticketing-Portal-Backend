@@ -60,7 +60,7 @@ function facts(p: TeamsNotificationPayload): { title: string; value: string }[] 
   if (p.estimateHours) f.push({ title: 'Estimate', value: p.estimateHours })
   if (p.additionalHours) f.push({ title: 'Additional Hours', value: p.additionalHours })
   if (p.createdBy) f.push({ title: 'Created By', value: p.createdBy })
-  if (p.developerName) f.push({ title: 'Developer', value: p.developerName })
+  if (p.developerName) f.push({ title: 'Support Engineer / Developer', value: p.developerName })
   if (p.revisionNumber) f.push({ title: 'Revision', value: p.revisionNumber })
   if (p.reason) f.push({ title: 'Reason', value: p.reason })
   if (p.fields) for (const x of p.fields) f.push({ title: x.label, value: x.value })

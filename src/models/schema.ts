@@ -290,6 +290,27 @@ export const notificationPreference = pgTable('notification_preferences', {
   clientIdIdx: index('notification_pref_client_idx').on(table.clientId),
 }))
 
+// --- Project-wise Notification Preferences ---------------------------------
+// Authoritative notification preferences, keyed by PROJECT (replacing the
+// client-wise table above, which is retained as an inheritance fallback while a
+// project has no explicit row for a channel/event). One row per
+// (project, channel, eventType); absent rows fall back to the client table and
+// then to the built-in defaults in src/lib/notification-preferences.ts.
+export const projectNotificationPreference = pgTable('project_notification_preferences', {
+  id: serial('id').primaryKey(),
+  projectId: integer('projectId')
+    .notNull()
+    .references(() => project.id, { onDelete: 'cascade' }),
+  channel: text('channel').notNull(),
+  eventType: text('eventType').notNull(),
+  enabled: boolean('enabled').notNull().default(true),
+  createdAt: timestamp('createdAt').notNull().defaultNow(),
+  updatedAt: timestamp('updatedAt').notNull().defaultNow(),
+}, (table) => ({
+  projectChannelEventIdx: uniqueIndex('project_notif_pref_project_channel_event_idx').on(table.projectId, table.channel, table.eventType),
+  projectIdIdx: index('project_notif_pref_project_idx').on(table.projectId),
+}))
+
 // --- Branding Table -------------------------------------------------------
 export const branding = pgTable('branding', {
   id: serial('id').primaryKey(),
@@ -419,6 +440,27 @@ export const projectDeveloper = pgTable('project_developer', {
   projectUserIdx: index('project_developer_project_user_idx').on(table.projectId, table.userId),
 }))
 
+// --- Project Microsoft Teams Channel ----------------------------------------
+// One Teams channel (webhook) per project. Teams notifications for a project
+// route to that project's channel; the global TEAMS_WEBHOOK_URL is only a
+// fallback. The webhook URL is a SECRET (it embeds an auth signature) — it is
+// never serialized to the frontend.
+
+export const projectTeamsChannel = pgTable('project_teams_channel', {
+  id: serial('id').primaryKey(),
+  projectId: integer('projectId')
+    .notNull()
+    .unique()
+    .references(() => project.id, { onDelete: 'cascade' }),
+  webhookUrl: text('webhookUrl').notNull(),
+  enabled: boolean('enabled').notNull().default(true),
+  configuredBy: text('configuredBy').references(() => user.id, { onDelete: 'set null' }),
+  createdAt: timestamp('createdAt').notNull().defaultNow(),
+  updatedAt: timestamp('updatedAt').notNull().defaultNow(),
+}, (table) => ({
+  enabledIdx: index('project_teams_channel_enabled_idx').on(table.enabled),
+}))
+
 // --- Relationships ---------------------------------------------------------
 
 export const projectRelations = relations(project, ({ one, many }) => ({
@@ -436,6 +478,8 @@ export const projectRelations = relations(project, ({ one, many }) => ({
   tickets: many(ticket),
   developers: many(projectDeveloper),
   clientUsers: many(projectClient),
+  teamsChannel: one(projectTeamsChannel),
+  notificationPreferences: many(projectNotificationPreference),
 }))
 
 export const moduleRelations = relations(module, ({ one, many }) => ({

@@ -30,6 +30,13 @@ const queue: TeamsQueueEntry[] = []
 let isProcessing = false
 let pollTimer: ReturnType<typeof setInterval> | null = null
 
+/**
+ * Safety cap on drain waves per processQueue() call. sendWithRetry() owns the
+ * retry budget and always removes an entry once it is exhausted, so the queue
+ * drains to empty; the cap only prevents a pathological spin.
+ */
+const MAX_DRAIN_WAVES = 25
+
 // Queue statistics
 let totalProcessed = 0
 let totalFailed = 0
@@ -50,6 +57,9 @@ export function enqueue(
   teamId: string,
   channelId: string,
   mention?: TeamsMention | null,
+  webhookUrl?: string,
+  projectId?: number,
+  destinationResolved: boolean = false,
 ): string {
   const id = generateQueueId()
 
@@ -61,6 +71,11 @@ export function enqueue(
     teamId,
     channelId,
     mention: mention || null,
+    // Per-project destination resolved by teams.service. Absent → mock mode.
+    // The URL is a secret and is deliberately NOT logged below.
+    webhookUrl: webhookUrl || undefined,
+    destinationResolved,
+    projectId,
     retryCount: 0,
     maxRetries: TEAMS_RETRY.MAX_RETRIES,
     createdAt: new Date(),
@@ -68,7 +83,8 @@ export function enqueue(
 
   queue.push(entry)
 
-  console.log(TEAMS_QUEUE_PREFIX + ' Queued ' + id + ': ' + eventType + ' -> ' + channelId)
+  const route = projectId ? 'project:' + projectId : (webhookUrl ? 'global' : 'mock')
+  console.log(TEAMS_QUEUE_PREFIX + ' Queued ' + id + ': ' + eventType + ' -> ' + route)
 
   // Fire immediate async processing (non-blocking)
   processQueue().catch(function (err: Error) {
@@ -86,40 +102,50 @@ export async function processQueue(): Promise<number> {
   let processed = 0
 
   try {
-    const items = [...queue]
+    // Drain in WAVES. A snapshot-only pass leaves entries enqueued during
+    // processing stranded until the next poll — with a burst of notifications
+    // (or in a process where polling is not running, e.g. scripts/tests) those
+    // messages would never be delivered. Each wave processes everything queued
+    // so far; entries are removed by sendWithRetry/processQueue as usual, so the
+    // loop terminates once the queue is empty.
+    let waves = 0
+    while (queue.length > 0 && waves < MAX_DRAIN_WAVES) {
+      waves++
+      const items = [...queue]
 
-    for (const entry of items) {
-      const startTime = Date.now()
-      try {
-        const result = await sendWithRetry(entry)
-        totalProcessingTimeMs += Date.now() - startTime
+      for (const entry of items) {
+        const startTime = Date.now()
+        try {
+          const result = await sendWithRetry(entry)
+          totalProcessingTimeMs += Date.now() - startTime
 
-        if (result) {
-          removeFromQueue(entry.id)
-          totalProcessed++
-          processed++
-          console.log(TEAMS_QUEUE_PREFIX + ' Delivered ' + entry.id + ': ' + entry.eventType)
-        } else if (entry.retryCount >= entry.maxRetries) {
-          console.error(TEAMS_QUEUE_PREFIX + ' Permanently failed ' + entry.id + ' after ' + entry.retryCount + ' retries')
-          removeFromQueue(entry.id)
-          totalFailed++
-          processed++
-        } else {
-          entry.retryCount++
-          totalRetried++
-          console.warn(TEAMS_QUEUE_PREFIX + ' Will retry ' + entry.id + ' (attempt ' + entry.retryCount + '/' + entry.maxRetries + ')')
-        }
-      } catch (err) {
-        const error = err instanceof Error ? err : new Error('Unknown error')
-        console.error(TEAMS_QUEUE_PREFIX + ' Error processing ' + entry.id + ': ' + error.message)
-        totalProcessingTimeMs += Date.now() - startTime
-        if (entry.retryCount >= entry.maxRetries) {
-          removeFromQueue(entry.id)
-          totalFailed++
-          processed++
-        } else {
-          entry.retryCount++
-          totalRetried++
+          if (result) {
+            removeFromQueue(entry.id)
+            totalProcessed++
+            processed++
+            console.log(TEAMS_QUEUE_PREFIX + ' Delivered ' + entry.id + ': ' + entry.eventType)
+          } else if (entry.retryCount >= entry.maxRetries) {
+            console.error(TEAMS_QUEUE_PREFIX + ' Permanently failed ' + entry.id + ' after ' + entry.retryCount + ' retries')
+            removeFromQueue(entry.id)
+            totalFailed++
+            processed++
+          } else {
+            entry.retryCount++
+            totalRetried++
+            console.warn(TEAMS_QUEUE_PREFIX + ' Will retry ' + entry.id + ' (attempt ' + entry.retryCount + '/' + entry.maxRetries + ')')
+          }
+        } catch (err) {
+          const error = err instanceof Error ? err : new Error('Unknown error')
+          console.error(TEAMS_QUEUE_PREFIX + ' Error processing ' + entry.id + ': ' + error.message)
+          totalProcessingTimeMs += Date.now() - startTime
+          if (entry.retryCount >= entry.maxRetries) {
+            removeFromQueue(entry.id)
+            totalFailed++
+            processed++
+          } else {
+            entry.retryCount++
+            totalRetried++
+          }
         }
       }
     }
@@ -190,8 +216,20 @@ function removeFromQueue(id: string): void {
 
 async function sendWithRetry(entry: TeamsQueueEntry): Promise<boolean> {
   // Dynamic import to avoid circular dependency
-  const { sendWebhookMessage, sendWebhookMessageMock, loadTeamsConfig } = await import('./teams-webhook-client')
-  const config = loadTeamsConfig()
+  const { sendWebhookMessage, sendWebhookMessageMock } = await import('./teams-webhook-client')
+
+  // ROOT-CAUSE NOTE (per-project routing): the destination is resolved ONCE by
+  // teams.service and carried on the queue entry. A RESOLVED entry is
+  // authoritative — the queue must never re-read process.env.TEAMS_WEBHOOK_URL
+  // for it, otherwise a project that explicitly has no channel (or a disabled
+  // one) would be silently re-routed to the global webhook. Legacy direct
+  // callers (destinationResolved === false) keep the historic env fallback.
+  const webhookUrl = entry.webhookUrl || (entry.destinationResolved ? undefined : process.env.TEAMS_WEBHOOK_URL)
+  const config = {
+    webhookUrl,
+    enabled: !!webhookUrl,
+    mockMode: !webhookUrl,
+  }
 
   let success: boolean
 
@@ -209,13 +247,17 @@ async function sendWithRetry(entry: TeamsQueueEntry): Promise<boolean> {
     if (!success) {
       const statusInfo = result.statusCode ? ' (HTTP ' + result.statusCode + ')' : ''
       const errorDetail = result.error ? ' [' + result.error + ']' : ''
+      // Never include the webhook URL in the diagnostic.
+      entry.lastError = (result.error || 'Unknown webhook error') + statusInfo
       console.warn(
-        TEAMS_QUEUE_PREFIX + ' Delivery failed for ' + entry.id + statusInfo + errorDetail + ': ' +
+        TEAMS_QUEUE_PREFIX + ' Delivery failed for ' + entry.id +
+        ' (project ' + (entry.projectId ?? 'global') + ')' + statusInfo + errorDetail + ': ' +
         (result.error || 'Unknown error'),
       )
     }
   } else {
-    // Use mock sender for development
+    // No destination configured for this project and no global fallback —
+    // simulate delivery (mock mode), exactly as before per-project channels.
     const result = await sendWebhookMessageMock(
       config,
       entry.teamId,
@@ -224,6 +266,7 @@ async function sendWithRetry(entry: TeamsQueueEntry): Promise<boolean> {
       entry.mention,
     )
     success = result
+    if (!success) entry.lastError = 'Mock delivery failed'
   }
 
   if (!success) {

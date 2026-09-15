@@ -46,16 +46,19 @@ import {
 } from '../services/email/email.service'
 import { sendTeamsNotification } from '../services/teams/teams.service'
 import { loadTeamsConfig } from '../services/teams/teams-webhook-client'
+import { isTeamsEnabledForProject } from '../services/teams/teams-channel-resolver'
 import type { TeamsNotificationPayload, TeamsEventType } from '../services/teams/teams.types'
 import { EVENT_COLOR_MAP } from '../services/teams/teams.constants'
 import { EMAIL_LOG_PREFIX } from '../services/email/email.constants'
 import { getFrontendUrl } from '../utils/frontend-url'
 import * as notificationService from '../services/notification.service'
 import * as prefRepo from '../repositories/notification-preference.repository'
+import * as projectPrefRepo from '../repositories/project-notification-preference.repository'
 import {
   canonicalNotificationEvent,
   indexPreferences,
   indexPreferencesFlexible,
+  mergeProjectPreferenceOverClient,
   isNotificationEnabled,
   type NotificationChannel,
 } from './notification-preferences'
@@ -74,6 +77,10 @@ export interface NotificationEventPayload {
   title: string
   message: string
   eventType: string
+  /** Project this event belongs to — drives project-wise notification preferences. */
+  projectId?: number
+  /** Ticket's client owner — used only as the inheritance fallback for prefs. */
+  clientId?: string
   projectName?: string
   ticketNumber?: string
   ticketTitle?: string
@@ -154,6 +161,18 @@ function isTeamsConfigured(): boolean {
   return _teamsEnabled
 }
 
+/**
+ * Teams destination check that understands per-project channels. When the
+ * global webhook is absent, a project-scoped channel can still receive — so a
+ * cheap env check comes first and the project lookup is only performed when it
+ * can actually change the outcome.
+ */
+async function hasTeamsDestination(projectId?: number): Promise<boolean> {
+  if (isTeamsConfigured()) return true
+  if (!projectId) return false
+  return await isTeamsEnabledForProject(projectId)
+}
+
 function toTeamsPayload(
   eventType: string,
   payload: NotificationEventPayload,
@@ -165,6 +184,7 @@ function toTeamsPayload(
     title: payload.title,
     message: payload.message,
     projectName: payload.projectName,
+    projectId: payload.projectId,
     ticketId: payload.ticketNumber ? '#' + payload.ticketNumber : undefined,
     ticketTitle: payload.ticketTitle,
     clientName: payload.clientName,
@@ -418,8 +438,47 @@ export interface DispatchUserNotificationOptions {
   teams?: boolean
   /** Preloaded preference index (userId → rows) to avoid extra queries in loops. */
   prefIndex?: Map<string, Map<string, boolean>>
+  /** Preloaded project preference index (projectId → merged rows) for loops. */
+  projectPrefIndex?: Map<string, Map<string, boolean>>
   /** Recipient-level cc for the email. */
   cc?: string | string[]
+}
+
+/**
+ * Resolve the effective preference rows for ONE dispatch.
+ *
+ *  - PROJECT-scoped event (payload.projectId present): PROJECT preferences are
+ *    authoritative for EVERY recipient, internal staff included. The legacy
+ *    client rows for the project's owning client are merged in as an inheritance
+ *    fallback only (project rows win). This is the project-wise behavior.
+ *  - Account-level event (no project): keep the historical per-client / per-user
+ *    lookup so welcome / password-reset style notifications are unchanged.
+ */
+async function loadPreferenceRowsForDispatch(
+  recipient: DispatchRecipient,
+  payload: NotificationEventPayload,
+  options: DispatchUserNotificationOptions,
+): Promise<Map<string, boolean> | undefined> {
+  if (payload.projectId) {
+    const key = String(payload.projectId)
+    const cached = options.projectPrefIndex?.get(key)
+    if (cached !== undefined) return cached
+
+    const projectRows = await projectPrefRepo.findByProjectId(payload.projectId)
+    const fallbackClientId = payload.clientId || recipient.clientId
+    const clientRows = fallbackClientId ? await prefRepo.findByClientId(fallbackClientId) : []
+    return mergeProjectPreferenceOverClient(projectRows, clientRows)
+  }
+
+  // Legacy (account-level) resolution.
+  if (recipient.role === 'client' && recipient.clientId) {
+    const cached = options.prefIndex?.get(recipient.clientId)
+    if (cached !== undefined) return cached
+    return indexPreferences(await prefRepo.findByClientId(recipient.clientId))
+  }
+  const cached = options.prefIndex?.get(recipient.id)
+  if (cached !== undefined) return cached
+  return indexPreferencesFlexible(await prefRepo.findByUserId(recipient.id))
 }
 
 /**
@@ -438,24 +497,11 @@ export async function dispatchUserNotification(
   try {
     const canonical = canonicalNotificationEvent(eventType) || eventType
 
-    // Preference index for this recipient (or reuse the caller's preloaded map).
-    // For client users, use client-based preferences. For internal users, use user-based.
-    let rowsForUser: Map<string, boolean> | undefined
-    if (recipient.role === 'client' && recipient.clientId) {
-      // Use client-based preferences for client recipients
-      rowsForUser = options.prefIndex?.get(recipient.clientId)
-      if (rowsForUser === undefined) {
-        const rows = await prefRepo.findByClientId(recipient.clientId)
-        rowsForUser = indexPreferences(rows)
-      }
-    } else {
-      // Use user-based preferences for internal users (developer, project_manager, admin)
-      rowsForUser = options.prefIndex?.get(recipient.id)
-      if (rowsForUser === undefined) {
-      const rows = await prefRepo.findByUserId(recipient.id)
-      rowsForUser = indexPreferencesFlexible(rows)
-    }
-    }
+    // Effective preference rows: PROJECT-wise when the event belongs to a
+    // project (authoritative for all recipients), else the legacy per-client /
+    // per-user resolution.
+    const rowsForUser = await loadPreferenceRowsForDispatch(recipient, payload, options)
+
     const prefUser = {
       role: recipient.role,
       enableTeamsNotifications: recipient.enableTeamsNotifications ?? false,
@@ -493,7 +539,7 @@ export async function dispatchUserNotification(
     const teamsWanted = options.teams !== false
     if (teamsWanted) {
       const enabled = isNotificationEnabled(rowsForUser, 'teams', canonical, prefUser)
-      if (enabled && isTeamsConfigured()) {
+      if (enabled && (await hasTeamsDestination(userPayload.projectId))) {
         const teamsEvent = TEAMS_EVENT_BY_PREFERENCE[canonical] || canonical
         sendTeamsNotificationInternal(teamsEvent, userPayload, recipient)
       }

@@ -14,6 +14,7 @@ import { walletsRouter } from './routes/wallets'
 import { notificationsRouter } from './routes/notifications'
 import { reportsRouter } from './routes/reports'
 import clientNotificationPreferencesRouter from './routes/client-notification-preferences'
+import projectNotificationPreferencesRouter from './routes/project-notification-preferences'
 import { attachmentsRouter } from './routes/attachments'
 import { onboardingRouter } from './routes/onboarding'
 import { errorHandler } from './middleware/error-handler'
@@ -50,6 +51,10 @@ app.use('/api/upload', routeTimingMiddleware('Upload'), uploadRouter)
 app.use('/api/users', routeTimingMiddleware('Users'), usersRouter)
 app.use('/api/tickets', routeTimingMiddleware('Tickets'), ticketsRouter)
 app.use('/api/projects', routeTimingMiddleware('Projects'), projectsRouter)
+// Project-wise notification preferences. Mounted on the same base path AFTER
+// the projects router; projectsRouter has no route matching
+// `/:projectId/notification-preferences`, so requests fall through to here.
+app.use('/api/projects', routeTimingMiddleware('ProjectNotificationPreferences'), projectNotificationPreferencesRouter)
 app.use('/api/modules', routeTimingMiddleware('Modules'), modulesRouter)
 app.use('/api/wallets', routeTimingMiddleware('Wallets'), walletsRouter)
 app.use('/api/notifications', routeTimingMiddleware('Notifications'), notificationsRouter)

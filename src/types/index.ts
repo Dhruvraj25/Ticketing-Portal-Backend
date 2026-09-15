@@ -321,8 +321,8 @@ export const WALLET_STATUS_CONFIG: Record<WalletStatus, { label: string; color: 
 
 export const USER_ROLE_CONFIG: Record<UserRole, { label: string; color: string }> = {
   client: { label: 'Client', color: 'bg-blue-50 text-blue-600 border-blue-200' },
-  developer: { label: 'Developer', color: 'bg-green-50 text-green-600 border-green-200' },
-  project_manager: { label: 'Project Manager', color: 'bg-indigo-50 text-indigo-600 border-indigo-200' },
+  developer: { label: 'Support Engineer / Developer', color: 'bg-green-50 text-green-600 border-green-200' },
+  project_manager: { label: 'Support Manager / Project Manager', color: 'bg-indigo-50 text-indigo-600 border-indigo-200' },
   admin: { label: 'Admin', color: 'bg-amber-50 text-amber-600 border-amber-200' },
 }
 

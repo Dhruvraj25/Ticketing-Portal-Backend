@@ -118,6 +118,11 @@ export interface TeamsNotificationPayload {
   channelId?: string
   /** The target Team ID (defaults to defaultTeamId) */
   teamId?: string
+  /**
+   * Project this notification belongs to. Drives per-project channel routing:
+   * the project's configured Teams channel wins, then the global fallback.
+   */
+  projectId?: number
   /** Recipient user ID — used to enforce the customer Teams preference on the backend */
   recipientUserId?: string
   /** Recipient display name — used for the @mention in the Teams card */
@@ -169,6 +174,22 @@ export interface TeamsQueueEntry {
   teamId: string
   channelId: string
   mention?: TeamsMention | null
+  /**
+   * Destination webhook resolved from the PROJECT's Teams channel (or the
+   * global fallback). SECURITY: this is a secret — it is never logged and never
+   * exposed by the queue status route.
+   */
+  webhookUrl?: string
+  /**
+   * True when teams.service already resolved the destination (project channel
+   * or global fallback). A resolved entry with no webhookUrl means "no
+   * destination" → mock mode, and the queue must NOT fall back to the global
+   * env webhook. Legacy/direct enqueue callers leave this false and keep the
+   * historic global-env fallback.
+   */
+  destinationResolved?: boolean
+  /** Project whose channel this delivery targets (for tracing, not a secret). */
+  projectId?: number
   retryCount: number
   maxRetries: number
   createdAt: Date

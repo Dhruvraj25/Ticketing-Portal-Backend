@@ -102,7 +102,12 @@ router.post('/notification', requireAuth, async (req: AuthenticatedRequest, res:
     // Requirement #14 — enforce per-event Email preferences server-side. The
     // frontend is never trusted to enforce preferences: recipients who have
     // explicitly disabled this event on the Email channel are dropped here.
-    const sendTo = await filterByEmailPreferences(to, eventType)
+    // When the event belongs to a PROJECT, the PROJECT's preferences are
+    // authoritative for every recipient (internal staff included).
+    const rawProjectId = req.body?.projectId ?? data?.projectId
+    const parsedProjectId = Number.parseInt(String(rawProjectId), 10)
+    const projectId = Number.isFinite(parsedProjectId) && parsedProjectId > 0 ? parsedProjectId : undefined
+    const sendTo = await filterByEmailPreferences(to, eventType, projectId)
     if (sendTo.length === 0) {
       return res.json({ success: true, message: 'Email notification skipped (recipient preference)', skipped: true })
     }
@@ -126,7 +131,7 @@ router.post('/notification', requireAuth, async (req: AuthenticatedRequest, res:
  * (e.g. external contacts) are kept, defaults are always enabled.
  * For client users, use client-based preferences.
  */
-async function filterByEmailPreferences(to: string | string[], eventType: string): Promise<string | string[]> {
+async function filterByEmailPreferences(to: string | string[], eventType: string, projectId?: number): Promise<string | string[]> {
   const addresses = (Array.isArray(to) ? to : [to])
     .map((a) => typeof a === 'string' ? a.trim() : '')
     .filter(Boolean)
@@ -154,6 +159,26 @@ async function filterByEmailPreferences(to: string | string[], eventType: string
       .where(sql`LOWER(${user.email}) IN (${sql.join(normalized.map(e => sql`${e}`), ',')})`)
 
     const matched = new Map(matchedUsers.map(u => [u.email.toLowerCase(), u]))
+
+    // ── PROJECT-wise path (authoritative for every recipient) ─────────────
+    if (projectId) {
+      const { loadMergedPreferenceMapForProject } = await import('../services/notification-preference.service')
+      const merged = await loadMergedPreferenceMapForProject(projectId)
+      const projectLevelEnabled = isNotificationEnabled(merged, 'email', canonical, { role: 'project_manager' })
+      console.log(
+        `[NotificationPreference] projectId=${projectId} event=${canonical} ` +
+        `enabled=${projectLevelEnabled} channel=email`,
+      )
+      return addresses.filter(addr => {
+        const u = matched.get(normalizeEmail(addr))
+        return isNotificationEnabled(merged, 'email', canonical, {
+          role: u?.role ?? 'client',
+          enableTeamsNotifications: u?.enableTeamsNotifications ?? false,
+        })
+      })
+    }
+
+    // ── Account-level path (legacy per-client / per-user resolution) ──────
     // Build preference index: for client users use client-based, for internal use user-based
     const prefIndex = await loadPrefIndexWithClientSupport(matchedUsers, prefRepoModule)
 

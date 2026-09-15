@@ -14,6 +14,62 @@ import {
 } from './teams.constants'
 import type { TeamsConfig, TeamsValidationResult, TeamsValidationReport } from './teams.types'
 
+// ─── Webhook URL Validation ─────────────────────────────────────────────────
+
+/**
+ * Host suffixes accepted as a Microsoft Teams webhook endpoint.
+ * Covers the modern Power Automate "Workflow" webhook (*.logic.azure.com,
+ * *.powerautomate.com / *.powerplatform.com) and the legacy Incoming Webhook
+ * (*.webhook.office.com, *.office.com). A link pointing anywhere else is not a
+ * Teams channel and is rejected before it is ever stored or called.
+ */
+export const TEAMS_WEBHOOK_HOST_SUFFIXES = [
+  '.webhook.office.com',
+  '.logic.azure.com',
+  '.powerautomate.com',
+  '.powerplatform.com',
+  '.office.com',
+] as const
+
+/**
+ * Validate a Teams channel link pasted by an admin.
+ * Pure and side-effect free: the returned message never echoes the value, so a
+ * rejected link can never leak into an error response or a log line.
+ */
+export function validateTeamsWebhookUrl(raw: string | null | undefined): { valid: boolean; message: string } {
+  const value = (raw || '').trim()
+  if (!value) return { valid: false, message: 'Teams channel link is required' }
+  if (value.length > 2048) return { valid: false, message: 'Teams channel link is too long' }
+
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    return { valid: false, message: 'Teams channel link is not a valid URL' }
+  }
+
+  if (url.protocol !== 'https:') {
+    return { valid: false, message: 'Teams channel link must use HTTPS' }
+  }
+  if (url.username || url.password) {
+    return { valid: false, message: 'Teams channel link must not contain embedded credentials' }
+  }
+
+  const host = url.hostname.toLowerCase()
+  const allowed = TEAMS_WEBHOOK_HOST_SUFFIXES.some(function (suffix) {
+    const bare = suffix.slice(1)
+    return host === bare || host.endsWith(suffix)
+  })
+  if (!allowed) {
+    return {
+      valid: false,
+      message: 'Teams channel link must be a Microsoft Teams webhook URL (webhook.office.com or *.logic.azure.com)',
+    }
+  }
+
+  return { valid: true, message: 'Valid Microsoft Teams webhook URL' }
+}
+
 // ─── Validation Rules ───────────────────────────────────────────────────────
 
 interface ValidationRule {
@@ -34,13 +90,8 @@ const VALIDATION_RULES: ValidationRule[] = [
     requiredForLive: true,
     validate: function (value) {
       if (!value) return { passed: false, message: 'Not set — mock mode active' }
-      if (!value.startsWith('https://')) return { passed: false, message: 'Must be HTTPS URL' }
-      try {
-        new URL(value)
-      } catch {
-        return { passed: false, message: 'Invalid URL format' }
-      }
-      return { passed: true, message: 'Valid HTTPS webhook URL' }
+      const result = validateTeamsWebhookUrl(value)
+      return { passed: result.valid, message: result.message }
     },
   },
 ]

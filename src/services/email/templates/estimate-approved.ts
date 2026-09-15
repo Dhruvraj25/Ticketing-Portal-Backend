@@ -19,7 +19,7 @@ export function estimateApprovedTemplate(
       emailFieldRow('Title', escapeHtml(data.ticketTitle)) +
       emailFieldRow('Estimated Hours', `${escapeHtml(data.estimatedHours)}h`) +
       emailFieldRow('Approved By', escapeHtml(data.approvedBy)) +
-      (data.managerName ? emailFieldRow('Manager', escapeHtml(data.managerName)) : ''),
+      (data.managerName ? emailFieldRow('Support Manager', escapeHtml(data.managerName)) : ''),
     ) +
     emailButton('View Ticket', data.ticketLink, branding)
 

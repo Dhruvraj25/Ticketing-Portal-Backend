@@ -1,5 +1,9 @@
 import * as prefRepo from '../repositories/notification-preference.repository'
-import { BadRequestError, ForbiddenError } from '../utils/errors'
+import * as projectPrefRepo from '../repositories/project-notification-preference.repository'
+import { db } from '../config/db'
+import { project, user } from '../models/schema'
+import { eq } from 'drizzle-orm'
+import { BadRequestError, ForbiddenError, NotFoundError } from '../utils/errors'
 import {
   NOTIFICATION_CHANNELS,
   NOTIFICATION_CHANNEL_LABELS,
@@ -7,6 +11,7 @@ import {
   canonicalNotificationEvent,
   indexPreferences,
   indexPreferencesFlexible,
+  mergeProjectPreferenceOverClient,
   buildUserSettings,
   isNotificationEnabled,
   type NotificationChannel,
@@ -157,6 +162,135 @@ export async function updateClientNotificationPreferences(
   }
 
   return getClientNotificationPreferences(clientId)
+}
+
+// ─── Project-wise preference management (Admin / authorized Manager) ──────
+// PROJECT preferences are authoritative. The legacy client table is kept as an
+// inheritance fallback (safe, no-data-copy migration): a project row overrides
+// the client row for the same (channel, event); otherwise the client value is
+// used; otherwise the built-in default applies.
+
+export interface ProjectPreferenceContext {
+  projectId: number
+  projectName: string
+  clientId: string
+  /** Owning client's customer-level Teams flag — the Teams default for the UI. */
+  clientTeamsEnabled: boolean
+}
+
+/** Load a project's routing/authorization context (throws when missing). */
+export async function getProjectPreferenceContext(projectId: number): Promise<ProjectPreferenceContext> {
+  const [row] = await db
+    .select({
+      id: project.id,
+      projectName: project.projectName,
+      clientId: project.clientId,
+      clientTeamsEnabled: user.enableTeamsNotifications,
+    })
+    .from(project)
+    .leftJoin(user, eq(project.clientId, user.id))
+    .where(eq(project.id, projectId))
+    .limit(1)
+
+  if (!row) throw new NotFoundError('Project not found')
+  return {
+    projectId: row.id,
+    projectName: row.projectName,
+    clientId: row.clientId,
+    clientTeamsEnabled: !!row.clientTeamsEnabled,
+  }
+}
+
+/**
+ * Merged effective preference map for a project:
+ *   project rows (authoritative) over client rows (inheritance fallback).
+ */
+export async function loadMergedPreferenceMap(
+  projectId: number,
+  clientId?: string | null,
+): Promise<Map<string, boolean>> {
+  const projectRows = await projectPrefRepo.findByProjectId(projectId)
+  const clientRows = clientId ? await prefRepo.findByClientId(clientId) : []
+  return mergeProjectPreferenceOverClient(projectRows, clientRows)
+}
+
+/**
+ * Merged preference map for a project, resolving its owning client (for the
+ * legacy inheritance fallback) internally. Used by every dispatch-time
+ * enforcement point. Fail-open: a lookup error returns an EMPTY map so the
+ * built-in defaults apply and notifications are never silently dropped.
+ */
+export async function loadMergedPreferenceMapForProject(projectId: number): Promise<Map<string, boolean>> {
+  try {
+    const ctx = await getProjectPreferenceContext(projectId)
+    return await loadMergedPreferenceMap(projectId, ctx.clientId)
+  } catch (err) {
+    console.error(
+      '[NotificationPreference] project preference lookup failed (proceeding with defaults) ' +
+      'projectId=' + projectId + ': ' + (err instanceof Error ? err.message : String(err)),
+    )
+    return new Map<string, boolean>()
+  }
+}
+
+/** GET /api/projects/:projectId/notification-preferences */
+export async function getProjectNotificationPreferences(projectId: number) {
+  const ctx = await getProjectPreferenceContext(projectId)
+  const merged = await loadMergedPreferenceMap(projectId, ctx.clientId)
+
+  const byProject = new Map<string, Map<string, boolean>>()
+  byProject.set(String(projectId), merged)
+
+  const preferences: UserNotificationSetting[] = buildUserSettings(
+    // Teams default follows the owning client's customer flag (unchanged rule).
+    { role: 'client', enableTeamsNotifications: ctx.clientTeamsEnabled },
+    byProject,
+    String(projectId),
+  )
+
+  return {
+    projectId,
+    projectName: ctx.projectName,
+    clientId: ctx.clientId,
+    channels: NOTIFICATION_CHANNELS.map(c => ({ channel: c, label: NOTIFICATION_CHANNEL_LABELS[c] })),
+    preferences,
+  }
+}
+
+/** PUT /api/projects/:projectId/notification-preferences */
+export async function updateProjectNotificationPreferences(
+  projectId: number,
+  body: { preferences?: PreferenceUpdate[] },
+) {
+  const updates = body?.preferences
+  if (!Array.isArray(updates) || updates.length === 0) {
+    throw new BadRequestError('preferences must be a non-empty array of { eventType, channel, enabled }')
+  }
+  if (updates.length > 200) {
+    throw new BadRequestError('Too many preference updates')
+  }
+
+  await getProjectPreferenceContext(projectId)
+
+  const seen = new Set<string>()
+  for (const u of updates) {
+    if (!u || typeof u !== 'object') throw new BadRequestError('Each preference update must be an object')
+
+    const canonical = canonicalNotificationEvent(u.eventType)
+    if (!canonical) throw new BadRequestError(`Unknown notification event: ${u.eventType}`)
+    if (!NOTIFICATION_CHANNELS.includes(u.channel as NotificationChannel)) {
+      throw new BadRequestError(`Unknown notification channel: ${u.channel}`)
+    }
+    if (typeof u.enabled !== 'boolean') throw new BadRequestError('enabled must be a boolean')
+
+    const dedupeKey = `${u.channel}:${canonical}`
+    if (seen.has(dedupeKey)) continue
+    seen.add(dedupeKey)
+
+    await projectPrefRepo.upsertForProject(projectId, u.channel, canonical, u.enabled)
+  }
+
+  return getProjectNotificationPreferences(projectId)
 }
 
 /**

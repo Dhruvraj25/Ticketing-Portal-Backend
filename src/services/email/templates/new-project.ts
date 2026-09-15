@@ -19,7 +19,7 @@ export function newProjectTemplate(
       emailFieldRow('Project', escapeHtml(data.projectName)) +
       emailFieldRow('Project Code', escapeHtml(data.projectCode)) +
       (data.clientName ? emailFieldRow('Client', escapeHtml(data.clientName)) : '') +
-      (data.managerName ? emailFieldRow('Manager', escapeHtml(data.managerName)) : '') +
+      (data.managerName ? emailFieldRow('Support Manager', escapeHtml(data.managerName)) : '') +
       (data.startDate ? emailFieldRow('Start Date', escapeHtml(data.startDate)) : ''),
     ) +
     emailParagraph('You can view the project details using the button below.') +

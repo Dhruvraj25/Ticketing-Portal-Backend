@@ -18,7 +18,7 @@ export function developerStartedWorkTemplate(
     emailFieldTable(
       emailFieldRow('Ticket', `#${escapeHtml(data.ticketNumber)}`) +
       emailFieldRow('Title', escapeHtml(data.ticketTitle)) +
-      (data.developerName ? emailFieldRow('Developer', escapeHtml(data.developerName)) : '') +
+      (data.developerName ? emailFieldRow('Support Engineer / Developer', escapeHtml(data.developerName)) : '') +
       (data.description ? emailFieldRow('Details', escapeHtml(data.description)) : ''),
     ) +
     emailButton('View Ticket', data.ticketLink, branding)

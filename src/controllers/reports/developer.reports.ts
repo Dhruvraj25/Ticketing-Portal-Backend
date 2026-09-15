@@ -31,10 +31,10 @@ export async function getDeveloperProductivityReport(filters: ReportFilters, cur
   }))
 
   return {
-    meta: { totalRecords: stats.length, generatedAt: new Date().toISOString(), appliedFilters: Object.entries(filters).filter(([_, v]) => v).map(([k]) => k.replace(/_/g, ' ')), summary: { Developers: stats.length, 'Total Hours': `${stats.reduce((s, d) => s + d.totalHours, 0)}h`, 'Total Resolved': stats.reduce((s, d) => s + d.ticketsResolved, 0) } },
-    columns: [{ key: 'name', label: 'Developer', type: 'text' }, { key: 'totalHours', label: 'Hours Logged', type: 'number' }, { key: 'ticketsAssigned', label: 'Assigned', type: 'number' }, { key: 'ticketsResolved', label: 'Resolved', type: 'number' }, { key: 'avgHoursPerTicket', label: 'Avg Hours/Ticket', type: 'number' }],
+    meta: { totalRecords: stats.length, generatedAt: new Date().toISOString(), appliedFilters: Object.entries(filters).filter(([_, v]) => v).map(([k]) => k.replace(/_/g, ' ')), summary: { 'Support Engineers / Developers': stats.length, 'Total Hours': `${stats.reduce((s, d) => s + d.totalHours, 0)}h`, 'Total Resolved': stats.reduce((s, d) => s + d.ticketsResolved, 0) } },
+    columns: [{ key: 'name', label: 'Support Engineer / Developer', type: 'text' }, { key: 'totalHours', label: 'Hours Logged', type: 'number' }, { key: 'ticketsAssigned', label: 'Assigned', type: 'number' }, { key: 'ticketsResolved', label: 'Resolved', type: 'number' }, { key: 'avgHoursPerTicket', label: 'Avg Hours/Ticket', type: 'number' }],
     data: stats,
-    charts: [{ type: 'bar', title: 'Hours per Developer', data: stats.map(d => ({ name: d.name, value: d.totalHours })) }, { type: 'bar', title: 'Tickets Resolved', data: stats.map(d => ({ name: d.name, value: d.ticketsResolved })) }],
+    charts: [{ type: 'bar', title: 'Hours per Support Engineer / Developer', data: stats.map(d => ({ name: d.name, value: d.totalHours })) }, { type: 'bar', title: 'Tickets Resolved', data: stats.map(d => ({ name: d.name, value: d.ticketsResolved })) }],
   }
 }
 
@@ -59,10 +59,10 @@ export async function getDeveloperWorkloadReport(filters: ReportFilters, current
 
   const stats = developers.map(dev => ({ name: dev.name, activeTickets: activeMap.get(dev.id) || 0, openTickets: openMap.get(dev.id) || 0, inProgressTickets: inProgressMap.get(dev.id) || 0 }))
   return {
-    meta: { totalRecords: stats.length, generatedAt: new Date().toISOString(), appliedFilters: ['Current workload'], summary: { Developers: stats.length, 'Active Tickets': stats.reduce((s, d) => s + d.activeTickets, 0) } },
-    columns: [{ key: 'name', label: 'Developer', type: 'text' }, { key: 'activeTickets', label: 'Active Tickets', type: 'number' }, { key: 'openTickets', label: 'Open', type: 'number' }, { key: 'inProgressTickets', label: 'Work in Progress', type: 'number' }],
+    meta: { totalRecords: stats.length, generatedAt: new Date().toISOString(), appliedFilters: ['Current workload'], summary: { 'Support Engineers / Developers': stats.length, 'Active Tickets': stats.reduce((s, d) => s + d.activeTickets, 0) } },
+    columns: [{ key: 'name', label: 'Support Engineer / Developer', type: 'text' }, { key: 'activeTickets', label: 'Active Tickets', type: 'number' }, { key: 'openTickets', label: 'Open', type: 'number' }, { key: 'inProgressTickets', label: 'Work in Progress', type: 'number' }],
     data: stats,
-    charts: [{ type: 'bar', title: 'Developer Workload', data: stats.map(d => ({ name: d.name, value: d.activeTickets })) }],
+    charts: [{ type: 'bar', title: 'Support Engineer / Developer Workload', data: stats.map(d => ({ name: d.name, value: d.activeTickets })) }],
   }
 }
 
