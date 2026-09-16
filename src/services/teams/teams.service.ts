@@ -11,7 +11,7 @@
 
 import { TEAMS_LOG_PREFIX, EVENT_COLOR_MAP } from './teams.constants'
 import { enqueue } from './teams-queue'
-import { resolveTeamsChannelForProject } from './teams-channel-resolver'
+import { resolveTeamsChannelForProject, getProjectTeamsMembers } from './teams-channel-resolver'
 import { teamsMonitor } from './teams-monitor'
 import {
   newTicketCard,
@@ -60,7 +60,40 @@ export function sendTeamsNotification(eventType: string, payload: TeamsNotificat
   // would add a query to every notification and could route a notification to
   // the wrong project when names collide across clients.
   resolveTeamsChannelForProject({ projectId: payload.projectId })
-    .then(function (resolved) {
+    .then(async function (resolved) {
+      // Resolve this project's @mention target + members ONCE, before
+      // enqueueing, so every retry mentions the same people (see
+      // teams-queue.ts). A project with no Team ID/Channel ID configured
+      // (the vast majority) resolves to zero members with no error — this is
+      // the normal, expected "no mentions configured" state, not a failure.
+      let mentionTarget: { teamId: string; channelId: string } | null = null
+      let mentionMembers: import('./teams.types').GraphTeamsMember[] = []
+      if (resolved.projectId && resolved.enabled) {
+        try {
+          const memberResult = await getProjectTeamsMembers(resolved.projectId)
+          if (memberResult.target) {
+            mentionTarget = memberResult.target
+            mentionMembers = memberResult.members
+            if (memberResult.error) {
+              // Message delivery is NOT blocked by this — the queue falls
+              // back to the plain webhook post. Only log, never throw.
+              console.warn(
+                TEAMS_LOG_PREFIX + ' Member lookup failed for project ' + resolved.projectId +
+                ' — message will still be sent, without mentions: ' + memberResult.error.message,
+              )
+            } else if (mentionMembers.length === 0) {
+              console.log(TEAMS_LOG_PREFIX + ' Project ' + resolved.projectId + ' Teams channel has zero members — sending without mentions.')
+            }
+          }
+        } catch (err) {
+          // Fail safe: member resolution must never block message delivery.
+          console.warn(
+            TEAMS_LOG_PREFIX + ' Member resolution threw for project ' + resolved.projectId +
+            ' — proceeding without mentions: ' + (err instanceof Error ? err.message : String(err)),
+          )
+        }
+      }
+
       // Queue for delivery — the queue owns retry/backoff and never re-resolves
       // the destination, so each project's notification keeps its own channel
       // across retries.
@@ -76,10 +109,13 @@ export function sendTeamsNotification(eventType: string, payload: TeamsNotificat
         // The destination is authoritative: even when it resolved to nothing,
         // the queue must not fall back to a global webhook the project opted out of.
         true,
+        mentionTarget,
+        mentionMembers,
       )
       teamsMonitor.recordQueueEvent(
         'Queued: ' + eventType +
-        ' [' + resolved.source + (resolved.projectId ? ' project=' + resolved.projectId : '') + ']',
+        ' [' + resolved.source + (resolved.projectId ? ' project=' + resolved.projectId : '') +
+        (mentionTarget ? ' mentions=' + mentionMembers.length : '') + ']',
       )
       // Never log the webhook URL (secret) — only the routing source.
       console.log(

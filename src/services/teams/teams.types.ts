@@ -135,12 +135,32 @@ export interface TeamsNotificationPayload {
  * A user mention attached to a Teams webhook message.
  * Renders a highlighted mention pill in Teams for the recipient (the legitimate
  * popup/banner mechanism available to webhook-based messages — no @everyone/@channel).
+ * NOTE: this does NOT reliably trigger a real per-user notification when sent
+ * through an Incoming Webhook — see GraphTeamsMember / TeamsMentionTarget
+ * below for the mechanism that does (Microsoft Graph chatMessage.mentions).
  */
 export interface TeamsMention {
   /** Display name used in the <at> tag */
   name: string
   /** Email/UPN or Azure AD object ID used to resolve the user */
   id: string
+}
+
+/**
+ * A real Teams channel member, resolved via Microsoft Graph. `id` is the
+ * member's Azure AD object ID — the only identifier Graph accepts to build
+ * a mention entity that actually pings the user (see teams-graph-client.ts).
+ */
+export interface GraphTeamsMember {
+  id: string
+  displayName: string
+  email?: string
+}
+
+/** A project's configured Microsoft Graph mention target — never shared across projects. */
+export interface TeamsMentionTarget {
+  teamId: string
+  channelId: string
 }
 
 /**
@@ -190,6 +210,14 @@ export interface TeamsQueueEntry {
   destinationResolved?: boolean
   /** Project whose channel this delivery targets (for tracing, not a secret). */
   projectId?: number
+  /**
+   * Present only when the project has a Team ID + Channel ID configured for
+   * @mentions. Resolved ONCE at enqueue time (teams.service.ts) so every
+   * retry attempt mentions the same people — never re-resolved mid-retry.
+   */
+  mentionTarget?: TeamsMentionTarget | null
+  /** Members to @mention, resolved once at enqueue time. Empty = no mentions (not an error). */
+  mentionMembers?: GraphTeamsMember[]
   retryCount: number
   maxRetries: number
   createdAt: Date

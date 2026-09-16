@@ -455,6 +455,14 @@ export const projectTeamsChannel = pgTable('project_teams_channel', {
   webhookUrl: text('webhookUrl').notNull(),
   enabled: boolean('enabled').notNull().default(true),
   configuredBy: text('configuredBy').references(() => user.id, { onDelete: 'set null' }),
+  // Optional — ONLY needed to enable real @mention delivery via Microsoft
+  // Graph (see services/teams/teams-graph-client.ts). A webhook URL alone
+  // cannot resolve channel membership or post mention-capable messages, so
+  // these are separate, admin-supplied identifiers. When either is absent,
+  // the project behaves exactly as before (webhook-only, no mentions
+  // attempted) — never inherited from another project or the global default.
+  teamId: text('teamId'),
+  channelId: text('channelId'),
   createdAt: timestamp('createdAt').notNull().defaultNow(),
   updatedAt: timestamp('updatedAt').notNull().defaultNow(),
 }, (table) => ({

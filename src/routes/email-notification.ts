@@ -160,41 +160,43 @@ async function filterByEmailPreferences(to: string | string[], eventType: string
 
     const matched = new Map(matchedUsers.map(u => [u.email.toLowerCase(), u]))
 
-    // ── PROJECT-wise path (authoritative for every recipient) ─────────────
+    // Legacy per-client / per-user resolution — unchanged by this phase, and
+    // used for EVERY internal-staff recipient regardless of project context
+    // (project-wise preferences are a CLIENT-ONLY concept; see below).
+    const prefIndex = await loadPrefIndexWithClientSupport(matchedUsers, prefRepoModule)
+    const legacyEnabled = (u: (typeof matchedUsers)[number] | undefined): boolean => {
+      if (!u) return true // not a portal user — keep (defaults apply)
+      if (u.role === 'client' && u.accountId) {
+        const clientRows = prefIndex.get(u.accountId)
+        return isNotificationEnabled(clientRows, 'email', canonical!, { role: 'client', enableTeamsNotifications: u.enableTeamsNotifications ?? false })
+      }
+      const rows = prefIndex.get(u.id)
+      return isNotificationEnabled(rows, 'email', canonical!, { role: u.role, enableTeamsNotifications: u.enableTeamsNotifications ?? false })
+    }
+
+    // ── PROJECT-wise path — authoritative ONLY for CLIENT recipients ──────
     if (projectId) {
       const { loadMergedPreferenceMapForProject } = await import('../services/notification-preference.service')
       const merged = await loadMergedPreferenceMapForProject(projectId)
-      const projectLevelEnabled = isNotificationEnabled(merged, 'email', canonical, { role: 'project_manager' })
       console.log(
-        `[NotificationPreference] projectId=${projectId} event=${canonical} ` +
-        `enabled=${projectLevelEnabled} channel=email`,
+        `[NotificationPreference] projectId=${projectId} event=${canonical} channel=email (client recipients only)`,
       )
       return addresses.filter(addr => {
         const u = matched.get(normalizeEmail(addr))
-        return isNotificationEnabled(merged, 'email', canonical, {
-          role: u?.role ?? 'client',
-          enableTeamsNotifications: u?.enableTeamsNotifications ?? false,
-        })
+        const role = u?.role ?? 'client'
+        if (role === 'client') {
+          return isNotificationEnabled(merged, 'email', canonical!, {
+            role: 'client',
+            enableTeamsNotifications: u?.enableTeamsNotifications ?? false,
+          })
+        }
+        // Internal-staff recipient — project preferences never apply to them.
+        return legacyEnabled(u)
       })
     }
 
-    // ── Account-level path (legacy per-client / per-user resolution) ──────
-    // Build preference index: for client users use client-based, for internal use user-based
-    const prefIndex = await loadPrefIndexWithClientSupport(matchedUsers, prefRepoModule)
-
-    return addresses.filter(addr => {
-      const u = matched.get(normalizeEmail(addr))
-      if (!u) return true // not a portal user — keep (defaults apply)
-      // For client users, check client-based preferences
-      if (u.role === 'client' && u.accountId) {
-        // Use accountId as client identifier for client-based preferences
-        const clientRows = prefIndex.get(u.accountId)
-        return isNotificationEnabled(clientRows, 'email', canonical, { role: 'client', enableTeamsNotifications: u.enableTeamsNotifications ?? false })
-      }
-      // For internal users, check user-based preferences
-      const rows = prefIndex.get(u.id)
-      return isNotificationEnabled(rows, 'email', canonical, { role: u.role, enableTeamsNotifications: u.enableTeamsNotifications ?? false })
-    })
+    // ── Account-level path (no project context) ────────────────────────────
+    return addresses.filter(addr => legacyEnabled(matched.get(normalizeEmail(addr))))
   } catch (err) {
     // Preference filtering must never block delivery — fail open on lookup errors.
     console.warn(`${EMAIL_LOG_PREFIX} Preference filter failed — proceeding: ${err instanceof Error ? err.message : String(err)}`)

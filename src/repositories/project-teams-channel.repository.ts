@@ -19,6 +19,9 @@ export interface ProjectTeamsChannelRow {
   webhookUrl: string
   enabled: boolean
   updatedAt: Date | null
+  /** Optional — only present when the admin configured @mention support. */
+  teamId: string | null
+  channelId: string | null
 }
 
 export interface ProjectTeamsChannelStatus {
@@ -40,6 +43,8 @@ export async function findByProjectId(projectId: number): Promise<ProjectTeamsCh
       webhookUrl: projectTeamsChannel.webhookUrl,
       enabled: projectTeamsChannel.enabled,
       updatedAt: projectTeamsChannel.updatedAt,
+      teamId: projectTeamsChannel.teamId,
+      channelId: projectTeamsChannel.channelId,
     })
     .from(projectTeamsChannel)
     .where(eq(projectTeamsChannel.projectId, projectId))
@@ -63,6 +68,8 @@ export async function findEnabledByProjectName(projectName: string): Promise<Pro
       webhookUrl: projectTeamsChannel.webhookUrl,
       enabled: projectTeamsChannel.enabled,
       updatedAt: projectTeamsChannel.updatedAt,
+      teamId: projectTeamsChannel.teamId,
+      channelId: projectTeamsChannel.channelId,
     })
     .from(projectTeamsChannel)
     .innerJoin(project, eq(projectTeamsChannel.projectId, project.id))
@@ -96,10 +103,17 @@ export async function listWithProjects(): Promise<ProjectTeamsChannelStatus[]> {
  * Create or replace the project's channel configuration.
  * `webhookUrl` is always overwritten on update (the admin re-pastes the link;
  * the stored secret is never displayed back to them).
+ *
+ * `teamId`/`channelId` are optional and independent of the webhook — they
+ * only enable @mention delivery via Microsoft Graph (see
+ * services/teams/teams-graph-client.ts). Passing `undefined` for either
+ * leaves the stored value unchanged (edit-in-place); passing an explicit
+ * empty string clears it. This mirrors the webhookUrl "omit to keep"
+ * convention already used by the PUT route.
  */
 export async function upsert(
   projectId: number,
-  data: { webhookUrl: string; enabled: boolean; configuredBy: string | null },
+  data: { webhookUrl: string; enabled: boolean; configuredBy: string | null; teamId?: string | null; channelId?: string | null },
 ): Promise<ProjectTeamsChannelRow> {
   const [row] = await db
     .insert(projectTeamsChannel)
@@ -108,6 +122,8 @@ export async function upsert(
       webhookUrl: data.webhookUrl,
       enabled: data.enabled,
       configuredBy: data.configuredBy,
+      teamId: data.teamId ?? null,
+      channelId: data.channelId ?? null,
       updatedAt: new Date(),
     })
     .onConflictDoUpdate({
@@ -116,6 +132,8 @@ export async function upsert(
         webhookUrl: data.webhookUrl,
         enabled: data.enabled,
         configuredBy: data.configuredBy,
+        ...(data.teamId !== undefined ? { teamId: data.teamId } : {}),
+        ...(data.channelId !== undefined ? { channelId: data.channelId } : {}),
         updatedAt: new Date(),
       },
     })
@@ -125,6 +143,8 @@ export async function upsert(
       webhookUrl: projectTeamsChannel.webhookUrl,
       enabled: projectTeamsChannel.enabled,
       updatedAt: projectTeamsChannel.updatedAt,
+      teamId: projectTeamsChannel.teamId,
+      channelId: projectTeamsChannel.channelId,
     })
   return row
 }
@@ -141,6 +161,8 @@ export async function setEnabled(projectId: number, enabled: boolean): Promise<P
       webhookUrl: projectTeamsChannel.webhookUrl,
       enabled: projectTeamsChannel.enabled,
       updatedAt: projectTeamsChannel.updatedAt,
+      teamId: projectTeamsChannel.teamId,
+      channelId: projectTeamsChannel.channelId,
     })
   return row ?? null
 }

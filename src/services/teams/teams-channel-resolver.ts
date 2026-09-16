@@ -16,7 +16,8 @@
 
 import { TEAMS_LOG_PREFIX, TEAMS_ENV_KEYS } from './teams.constants'
 import { validateTeamsWebhookUrl } from './teams-config-validator'
-import type { TeamsConfig } from './teams.types'
+import type { TeamsConfig, GraphTeamsMember } from './teams.types'
+import type { GraphCallError } from './teams-graph-client'
 
 export type TeamsWebhookSource = 'project' | 'global' | 'none'
 
@@ -141,6 +142,66 @@ export async function isTeamsEnabledForProject(projectId?: number): Promise<bool
   return resolved.enabled
 }
 
+export interface ProjectMentionTarget {
+  teamId: string
+  channelId: string
+}
+
+export interface ProjectTeamsMembersResult {
+  members: GraphTeamsMember[]
+  /** Present when member resolution could not complete (Graph error, missing permission, etc). */
+  error?: GraphCallError
+  /**
+   * The Graph target this result came from — undefined when the project has
+   * no Team ID/Channel ID configured (mentions were never attempted, this is
+   * NOT an error — it's the normal "webhook-only" case for most projects).
+   */
+  target?: ProjectMentionTarget
+}
+
+/**
+ * Resolve the Team ID + Channel ID configured for a SPECIFIC project only —
+ * this never reads another project's row and never falls back to the global
+ * TEAMS_DEFAULT_TEAM_ID/TEAMS_DEFAULT_CHANNEL_ID env defaults, so one
+ * project's members can never leak into another project's notification.
+ * A project with no teamId/channelId configured returns `null` — the normal,
+ * expected state for any project that hasn't opted into @mentions.
+ */
+async function resolveProjectMentionTarget(projectId: number): Promise<ProjectMentionTarget | null> {
+  try {
+    const repo = await import('../../repositories/project-teams-channel.repository')
+    const row = await repo.findByProjectId(projectId)
+    if (!row || !row.teamId || !row.channelId) return null
+    return { teamId: row.teamId, channelId: row.channelId }
+  } catch (err) {
+    console.error(
+      TEAMS_LOG_PREFIX + ' Mention-target lookup failed for project ' + projectId + ': ' +
+      (err instanceof Error ? err.message : String(err)),
+    )
+    return null
+  }
+}
+
+/**
+ * getProjectTeamsMembers(projectId) — the server-side member-lookup entry
+ * point required by the @mention feature.
+ *
+ *   1. Resolves ONLY this project's configured Team ID + Channel ID.
+ *   2. Returns `{ members: [] }` (no error) when the project has none
+ *      configured — the normal case; callers must treat this exactly like
+ *      "no mentions available" and fall back to the plain webhook message.
+ *   3. Otherwise fetches (and caches) the channel's real membership via
+ *      Microsoft Graph — see teams-graph-client.ts.
+ */
+export async function getProjectTeamsMembers(projectId: number): Promise<ProjectTeamsMembersResult> {
+  const target = await resolveProjectMentionTarget(projectId)
+  if (!target) return { members: [] }
+
+  const { getChannelMembers } = await import('./teams-graph-client')
+  const result = await getChannelMembers(target.teamId, target.channelId)
+  return { members: result.members, error: result.error, target }
+}
+
 /** Adapt a resolved channel to the transport config consumed by the queue. */
 export function toTeamsConfig(resolved: ResolvedTeamsChannel): TeamsConfig {
   return {
@@ -156,4 +217,5 @@ export const teamsChannelResolver = {
   isTeamsEnabledForProject,
   toTeamsConfig,
   getGlobalWebhookUrl,
+  getProjectTeamsMembers,
 }

@@ -122,11 +122,18 @@ router.post('/notification', requireAuth, async (req: AuthenticatedRequest, res:
     // Per-project channel routing: resolve the project (explicit id, ticket
     // number, or unique project name) BEFORE dispatch so the notification is
     // delivered to that project's Teams channel.
+    const projectIdBeforeResolve = teamsPayload.projectId
     try {
       teamsPayload.projectId = teamsPayload.projectId ?? await resolveProjectIdFromPayload(teamsPayload)
     } catch {
       // resolveProjectIdFromPayload already fails safe; never block dispatch.
     }
+    console.log(
+      '[Teams Trigger] event received eventType=' + eventType +
+      ' projectIdFromPayload=' + (projectIdBeforeResolve ?? '(none)') +
+      ' projectIdResolved=' + (teamsPayload.projectId ?? '(unresolved)') +
+      ' via=' + (projectIdBeforeResolve ? 'explicit' : (teamsPayload.projectId ? 'ticketNumber/projectName lookup' : 'none')),
+    )
 
     const recipientUserId = teamsPayload.recipientUserId
     const recipientEmail = teamsPayload.recipientEmail
@@ -153,19 +160,24 @@ router.post('/notification', requireAuth, async (req: AuthenticatedRequest, res:
           }
 
           let enabled: boolean
-          if (teamsPayload.projectId) {
-            // PROJECT-wise (authoritative for every recipient): the project's
-            // preferences govern this event; legacy client rows are only an
-            // inheritance fallback. Same preference source as Email.
+          // PROJECT-wise preferences are a CLIENT-ONLY concept (per the
+          // project-wise notification preferences spec): they are authoritative
+          // ONLY for client recipients. An internal-staff recipient (admin /
+          // project_manager / developer) ALWAYS takes the account-level branch
+          // below, even when the event has a project context — their own
+          // existing self-serve preferences (or the built-in default) govern
+          // them, completely unaffected by a project's client-facing toggle.
+          if (teamsPayload.projectId && recipient.role === 'client') {
             const { loadMergedPreferenceMapForProject } = await import('../services/notification-preference.service')
             const merged = canonical ? await loadMergedPreferenceMapForProject(teamsPayload.projectId) : new Map<string, boolean>()
             enabled = isNotificationEnabled(merged, 'teams', canonical || eventType, prefUser)
             console.log(
               '[NotificationPreference] projectId=' + teamsPayload.projectId + ' event=' + (canonical || eventType) +
-              ' enabled=' + enabled + ' channel=teams',
+              ' enabled=' + enabled + ' channel=teams (client recipient)',
             )
           } else {
-            // Account-level event (no project) — legacy per-client / per-user.
+            // Account-level event (no project, or a non-client recipient) —
+            // legacy per-client / per-user preferences, unchanged by this phase.
             let rows: any[] = []
             if (recipient.role === 'client' && recipient.accountId) {
               rows = canonical ? (await prefRepoModule.findByClientId(recipient.accountId)) : []
@@ -187,6 +199,10 @@ router.post('/notification', requireAuth, async (req: AuthenticatedRequest, res:
       }
     }
 
+    console.log(
+      '[Teams Trigger] dispatching=true eventType=' + eventType +
+      ' projectId=' + (teamsPayload.projectId ?? '(none)'),
+    )
     sendTeamsNotification(eventType, payload as TeamsNotificationPayload)
 
     return res.json({ success: true, message: 'Teams notification dispatched' })
@@ -376,6 +392,34 @@ router.get('/projects', requireAuth, requireAdminOnly, async (_req: Authenticate
 })
 
 /**
+ * Single project's @mention configuration status — never the webhook URL,
+ * never the Team ID/Channel ID values themselves (not secret, but the admin
+ * only needs to know whether they're set, matching the existing
+ * configured/enabled status pattern).
+ */
+router.get('/projects/:projectId/mentions', requireAuth, requireAdminOnly, async (req: AuthenticatedRequest | any, res: Response) => {
+  const projectId = Number.parseInt(String(req.params.projectId), 10)
+  if (!Number.isFinite(projectId) || projectId <= 0) {
+    return res.status(400).json({ error: 'Invalid project id.', code: 'INVALID_PROJECT_ID' })
+  }
+  try {
+    const { isGraphMentionsConfigured } = await import('../services/teams/teams-graph-client')
+    const repo = await import('../repositories/project-teams-channel.repository')
+    const row = await repo.findByProjectId(projectId)
+    const mentionTargetConfigured = !!row?.teamId && !!row?.channelId
+    return res.json({
+      projectId,
+      graphAppConfigured: isGraphMentionsConfigured(),
+      mentionTargetConfigured,
+      mentionsAvailable: isGraphMentionsConfigured() && mentionTargetConfigured,
+    })
+  } catch (err) {
+    logChannelError('MENTIONS_STATUS_FAILED', { projectId, message: err instanceof Error ? err.message : 'unknown' })
+    return res.status(500).json({ error: 'Could not load mention status.', code: 'TEAMS_MENTIONS_STATUS_FAILED' })
+  }
+})
+
+/**
  * Create or update a project's Teams channel.
  * Body: { webhookUrl?: string, enabled?: boolean }
  *  - On create, webhookUrl is required.
@@ -388,9 +432,15 @@ router.put('/projects/:projectId/channel', requireAuth, requireAdminOnly, async 
     return res.status(400).json({ error: 'Invalid project id.', code: 'INVALID_PROJECT_ID' })
   }
 
-  const body = (req.body || {}) as { webhookUrl?: unknown; enabled?: unknown }
+  const body = (req.body || {}) as { webhookUrl?: unknown; enabled?: unknown; teamId?: unknown; channelId?: unknown }
   const linkProvided = typeof body.webhookUrl === 'string' && body.webhookUrl.trim().length > 0
   const wantsEnabled = body.enabled === undefined ? true : body.enabled === true
+  // Optional — only needed to enable @mention delivery via Microsoft Graph.
+  // Both must be provided together (a Channel ID without a Team ID, or vice
+  // versa, cannot resolve a Graph channel) — omit both to leave unchanged,
+  // or pass empty strings to explicitly clear mention support for this project.
+  const teamIdProvided = typeof body.teamId === 'string'
+  const channelIdProvided = typeof body.channelId === 'string'
 
   try {
     const { db } = await import('../config/db')
@@ -403,7 +453,7 @@ router.put('/projects/:projectId/channel', requireAuth, requireAdminOnly, async 
       .where(eq(project.id, projectId))
       .limit(1)
     if (!projectRow) {
-      return res.status(404).json({ error: 'Project not found.', code: 'PROJECT_NOT_FOUND' })
+      return res.status(404).json({ error: 'This project could not be found.', code: 'PROJECT_NOT_FOUND' })
     }
 
     const repo = await import('../repositories/project-teams-channel.repository')
@@ -411,7 +461,7 @@ router.put('/projects/:projectId/channel', requireAuth, requireAdminOnly, async 
 
     if (!existing && !linkProvided) {
       return res.status(400).json({
-        error: 'A Microsoft Teams channel link is required.',
+        error: 'Please enter a valid Microsoft Teams webhook URL.',
         code: 'TEAMS_CHANNEL_LINK_REQUIRED',
       })
     }
@@ -427,10 +477,24 @@ router.put('/projects/:projectId/channel', requireAuth, requireAdminOnly, async 
       nextUrl = (body.webhookUrl as string).trim()
     }
 
+    // Team ID / Channel ID must be provided together — a partial pair can
+    // never resolve a real Graph channel and would silently disable mentions
+    // without the admin realizing which value was missing.
+    if (teamIdProvided !== channelIdProvided) {
+      return res.status(400).json({
+        error: 'Team ID and Channel ID must both be provided (or both left blank) to configure @mentions.',
+        code: 'TEAMS_MENTION_TARGET_INCOMPLETE',
+      })
+    }
+    const teamId = teamIdProvided ? (body.teamId as string).trim() || null : undefined
+    const channelId = channelIdProvided ? (body.channelId as string).trim() || null : undefined
+
     const saved = await repo.upsert(projectId, {
       webhookUrl: nextUrl as string,
       enabled: wantsEnabled,
       configuredBy: req.user?.id ?? null,
+      teamId,
+      channelId,
     })
 
     return res.json({
@@ -438,12 +502,13 @@ router.put('/projects/:projectId/channel', requireAuth, requireAdminOnly, async 
       projectId,
       configured: true,
       enabled: !!saved.enabled,
+      mentionsConfigured: !!saved.teamId && !!saved.channelId,
       updatedAt: saved.updatedAt ? new Date(saved.updatedAt).toISOString() : new Date().toISOString(),
       message: saved.enabled ? 'Teams channel saved.' : 'Teams channel saved and disabled.',
     })
   } catch (err) {
     logChannelError('SAVE_FAILED', { projectId, message: err instanceof Error ? err.message : 'unknown' })
-    return res.status(500).json({ error: 'Could not save the Teams channel configuration.', code: 'TEAMS_CHANNEL_SAVE_FAILED' })
+    return res.status(500).json({ error: 'Unable to save the Teams webhook configuration. Please try again.', code: 'TEAMS_CHANNEL_SAVE_FAILED' })
   }
 })
 
@@ -530,6 +595,72 @@ router.post('/projects/:projectId/test', requireAuth, requireAdminOnly, async (r
       })
     }
 
+    // ── Mention test (independent of the webhook check above) ─────────────
+    // Only attempted when this project has a Team ID + Channel ID configured
+    // (see PUT .../channel). A project without one is NOT an error — mentions
+    // were simply never requested for it; `attempted: false` reflects that.
+    const { getProjectTeamsMembers } = await import('../services/teams/teams-channel-resolver')
+    const memberResult = await getProjectTeamsMembers(projectId)
+    let mentionTest: {
+      attempted: boolean
+      success: boolean
+      membersMentioned: number
+      message: string
+      error?: string
+    }
+
+    if (!memberResult.target) {
+      mentionTest = {
+        attempted: false,
+        success: false,
+        membersMentioned: 0,
+        message: 'No Team ID/Channel ID configured for this project — @mentions were not attempted.',
+      }
+    } else if (memberResult.error) {
+      logChannelError('TEST_MENTION_LOOKUP_FAILED', { projectId, message: memberResult.error.message })
+      mentionTest = {
+        attempted: true,
+        success: false,
+        membersMentioned: 0,
+        message: 'Teams message was sent, but member mentions could not be resolved.',
+        error: memberResult.error.missingPermission
+          ? 'Missing Microsoft Graph permission: ' + memberResult.error.missingPermission
+          : memberResult.error.message,
+      }
+    } else if (memberResult.members.length === 0) {
+      mentionTest = {
+        attempted: true,
+        success: true,
+        membersMentioned: 0,
+        message: 'The configured Teams channel currently has no members to mention.',
+      }
+    } else {
+      const { sendChannelMessageWithMentions } = await import('../services/teams/teams-graph-client')
+      const mentionCard = testMessageCard({ ...testPayload, message: 'This is a test @mention message for the project Teams channel.' })
+      const mentionResult = await sendChannelMessageWithMentions({
+        teamId: memberResult.target.teamId,
+        channelId: memberResult.target.channelId,
+        card: mentionCard,
+        members: memberResult.members,
+      })
+      if (!mentionResult.success) {
+        logChannelError('TEST_MENTION_SEND_FAILED', {
+          projectId,
+          statusCode: mentionResult.statusCode ?? 0,
+          message: mentionResult.error || 'unknown',
+        })
+      }
+      mentionTest = {
+        attempted: true,
+        success: mentionResult.success,
+        membersMentioned: mentionResult.success ? memberResult.members.length : 0,
+        message: mentionResult.success
+          ? 'Mention test delivered — ' + memberResult.members.length + ' member(s) mentioned.'
+          : 'Teams message was sent, but the @mention delivery failed.',
+        error: mentionResult.success ? undefined : mentionResult.error,
+      }
+    }
+
     return res.json({
       success: result.success,
       projectId,
@@ -541,6 +672,7 @@ router.post('/projects/:projectId/test', requireAuth, requireAdminOnly, async (r
       message: result.success ? 'Test message delivered to the project Teams channel.' : 'The Teams webhook rejected the test message.',
       // Sanitized only — never the webhook URL, signature or raw response body.
       error: result.success ? undefined : 'The Teams webhook rejected the test message. Verify the channel link and its permissions.',
+      mentionTest,
     })
   } catch (err) {
     logChannelError('TEST_FAILED', { projectId, message: err instanceof Error ? err.message : 'unknown' })

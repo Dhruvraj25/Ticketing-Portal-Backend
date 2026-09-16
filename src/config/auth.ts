@@ -20,14 +20,25 @@ import { normalizeEmail } from '../utils/email'
 // "session_invalid" while the Railway log shows hasCookie=true.
 //
 // Fix: pin useSecureCookies to the FRONTEND's scheme (not this instance's
-// baseURL). In production the frontend is always https (Vercel) → secure
-// prefix → matches the cookie the browser holds. In local dev the frontend is
-// http://localhost:3000 → unprefixed → matches the dev cookie. Reproduced
-// with better-auth@1.6.14: same secret + same DB, http baseURL → NULL,
-// https baseURL → SUCCESS.
+// baseURL) — and ONLY the frontend's scheme. In production FRONTEND_URL is
+// always https (Vercel) → secure prefix → matches the cookie the browser
+// holds. In local dev FRONTEND_URL is http://localhost:3000 → unprefixed →
+// matches the dev cookie.
+//
+// 2nd-order bug found in a later audit: this used to also OR in
+// `process.env.NODE_ENV === 'production'`, which silently re-broke the exact
+// case this fix was written for. A stray `NODE_ENV=production` in a local
+// .env (left over from an unrelated performance-audit session) forced
+// AUTH_USE_SECURE_COOKIES back to true even though FRONTEND_URL correctly
+// resolved to http://localhost:3000 — so the backend demanded
+// "__Secure-better-auth.session_token" while the locally-running frontend
+// only ever issues the unprefixed "better-auth.session_token". Every
+// authenticated call (Teams admin included) 401'd with COOKIE_NOT_FOUND
+// despite CORS being fine and the cookie being correctly forwarded. The
+// frontend's own scheme is the ONLY signal that should decide this — NODE_ENV
+// must never override it.
 const AUTH_FRONTEND_URL = getFrontendUrl()
-const AUTH_USE_SECURE_COOKIES =
-  AUTH_FRONTEND_URL.startsWith('https://') || process.env.NODE_ENV === 'production'
+const AUTH_USE_SECURE_COOKIES = AUTH_FRONTEND_URL.startsWith('https://')
 
 console.log(
   '[AuthConfig] ' +

@@ -50,10 +50,11 @@ export async function requireAuth(req: AuthenticatedRequest, res: Response, next
   const cookieHeader = req.headers.cookie || ''
   const parsedCookies = parseRawCookies(cookieHeader)
 
-  // Determine the expected session cookie name (mirrors Backend/src/config/auth.ts)
+  // Determine the expected session cookie name (mirrors Backend/src/config/auth.ts
+  // AUTH_USE_SECURE_COOKIES exactly — frontend scheme ONLY, never NODE_ENV;
+  // see the comment there for why the NODE_ENV fallback was removed).
   const frontendUrl = process.env.FRONTEND_URL || ''
-  const useSecureCookies =
-    frontendUrl.startsWith('https://') || process.env.NODE_ENV === 'production'
+  const useSecureCookies = frontendUrl.startsWith('https://')
   const expectedCookieName = useSecureCookies
     ? '__Secure-better-auth.session_token'
     : 'better-auth.session_token'

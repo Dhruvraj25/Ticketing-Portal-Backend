@@ -20,7 +20,7 @@ import {
   TEAMS_RETRY,
   TEAMS_QUEUE as QUEUE_CONFIG,
 } from './teams.constants'
-import type { TeamsQueueEntry, AdaptiveCard, TeamsMention } from './teams.types'
+import type { TeamsQueueEntry, AdaptiveCard, TeamsMention, TeamsMentionTarget, GraphTeamsMember } from './teams.types'
 import type { TeamsEventType } from './teams.types'
 
 // ─── Queue State ────────────────────────────────────────────────────────────
@@ -60,6 +60,8 @@ export function enqueue(
   webhookUrl?: string,
   projectId?: number,
   destinationResolved: boolean = false,
+  mentionTarget?: TeamsMentionTarget | null,
+  mentionMembers?: GraphTeamsMember[],
 ): string {
   const id = generateQueueId()
 
@@ -76,6 +78,10 @@ export function enqueue(
     webhookUrl: webhookUrl || undefined,
     destinationResolved,
     projectId,
+    // Resolved ONCE by teams.service, same principle as webhookUrl above —
+    // every retry mentions the same people, never re-resolved mid-retry.
+    mentionTarget: mentionTarget || null,
+    mentionMembers: mentionMembers || [],
     retryCount: 0,
     maxRetries: TEAMS_RETRY.MAX_RETRIES,
     createdAt: new Date(),
@@ -84,7 +90,8 @@ export function enqueue(
   queue.push(entry)
 
   const route = projectId ? 'project:' + projectId : (webhookUrl ? 'global' : 'mock')
-  console.log(TEAMS_QUEUE_PREFIX + ' Queued ' + id + ': ' + eventType + ' -> ' + route)
+  const mentionInfo = entry.mentionTarget ? (', mentions=' + entry.mentionMembers!.length) : ''
+  console.log(TEAMS_QUEUE_PREFIX + ' Queued ' + id + ': ' + eventType + ' -> ' + route + mentionInfo)
 
   // Fire immediate async processing (non-blocking)
   processQueue().catch(function (err: Error) {
@@ -217,6 +224,32 @@ function removeFromQueue(id: string): void {
 async function sendWithRetry(entry: TeamsQueueEntry): Promise<boolean> {
   // Dynamic import to avoid circular dependency
   const { sendWebhookMessage, sendWebhookMessageMock } = await import('./teams-webhook-client')
+
+  // ── @mention-capable path (Microsoft Graph) — tried FIRST when this
+  // project is configured for it. On success this IS the channel post (never
+  // also post via webhook — that would duplicate the message). On failure,
+  // fall through to the existing webhook path within this SAME attempt, so
+  // the notification is still guaranteed to reach the channel even when
+  // Graph is unavailable/misconfigured — just without mentions that cycle.
+  // This never consumes extra retry budget: one sendWithRetry call is one
+  // attempt, whichever transport succeeds.
+  if (entry.mentionTarget) {
+    const { sendChannelMessageWithMentions } = await import('./teams-graph-client')
+    const graphResult = await sendChannelMessageWithMentions({
+      teamId: entry.mentionTarget.teamId,
+      channelId: entry.mentionTarget.channelId,
+      card: entry.card,
+      members: entry.mentionMembers || [],
+    })
+    if (graphResult.success) {
+      return true
+    }
+    console.warn(
+      TEAMS_QUEUE_PREFIX + ' Graph mention send failed for ' + entry.id +
+      ' (project ' + (entry.projectId ?? '?') + '), falling back to webhook: ' +
+      (graphResult.error || 'unknown'),
+    )
+  }
 
   // ROOT-CAUSE NOTE (per-project routing): the destination is resolved ONCE by
   // teams.service and carried on the queue entry. A RESOLVED entry is
