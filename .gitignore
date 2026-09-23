@@ -1,7 +1,12 @@
 node_modules/
-dist/
 .env
 .env.local
-.railway/
-.vercel/
+.env.*.local
+!.env.example
+logs/
 *.log
+dist/
+build/
+coverage/
+.vscode/
+.DS_Store
