@@ -3,7 +3,8 @@
     "lib": ["esnext"],
     "target": "ES2020",
     "module": "CommonJS",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
+    "types": ["node"],
     "esModuleInterop": true,
     "strict": true,
     "skipLibCheck": true,
@@ -14,7 +15,6 @@
     "sourceMap": true,
     "outDir": "./dist",
     "rootDir": "./src",
-    "baseUrl": ".",
     "paths": {
       "@/*": ["./src/*"]
     }

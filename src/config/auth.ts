@@ -1,4 +1,6 @@
 import { betterAuth } from 'better-auth'
+// Type-only: lets declaration emit name the Pool type inside `auth`'s inferred type (TS2883).
+import type { Pool } from 'pg'
 import { pool } from './db'
 import { db } from './db'
 import { user as userTable } from '../models/schema'

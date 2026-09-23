@@ -27,7 +27,7 @@
     "nodemailer": "^9.0.5",
     "pg": "^8.21.0",
     "resend": "^6.19.0",
-    "typescript": "5.7.3",
+    "typescript": "7.0.2",
     "zod": "^4.4.3"
   },
   "devDependencies": {
