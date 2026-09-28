@@ -13,6 +13,7 @@ import {
   isWebhookReady,
 } from './services/teams/teams-webhook-client'
 import { logMicrosoftSmtpStatus } from './services/email/providers/microsoft-smtp.provider'
+import { initTemplateOverrides } from './services/email/email-template-overrides'
 
 const PORT = parseInt(process.env.PORT || '4000', 10)
 
@@ -43,6 +44,9 @@ async function startServer() {
   // ─── Initialize Email System ────────────────────────────────────────────
 
   await initTransporter()
+
+  // Admin-customized email templates (Email Management); code templates stay the fallback.
+  await initTemplateOverrides()
 
   startEmailQueuePolling()
 

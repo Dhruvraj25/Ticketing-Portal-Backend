@@ -22,6 +22,7 @@ import { routeTimingMiddleware } from './lib/performance-profiler'
 import devEmailRoutes from "./routes/dev-email"
 import emailNotificationRoutes from "./routes/email-notification"
 import teamsNotificationRoutes from "./routes/teams-notification"
+import emailAdminRoutes from "./routes/email-admin"
 import bootstrapRouter from './routes/bootstrap'
 import authDiagnosticsRouter from './routes/auth-diagnostics'
 
@@ -73,6 +74,8 @@ app.use('/api/email', routeTimingMiddleware('Email'), emailNotificationRoutes)
 
 // ─── Teams Notifications ───────────────────────────────────────────────
 app.use('/api/teams', routeTimingMiddleware('Teams'), teamsNotificationRoutes)
+// Admin → Email Management (admin-only; see routes/email-admin.ts)
+app.use('/api/email-admin', routeTimingMiddleware('EmailAdmin'), emailAdminRoutes)
 // ─── Health Check ─────────────────────────────────────────────────────
 app.get('/api/health', routeTimingMiddleware('Health'), (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() })

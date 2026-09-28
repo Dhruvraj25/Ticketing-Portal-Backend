@@ -47,6 +47,7 @@ import {
   sendRevisionApproved,
   sendRevisionRejected,
   sendSupportRenewalReminder,
+  sendSupportRenewalRequest,
   sendLoginCredentials,
 } from '../services/email/email.service'
 import { EMAIL_LOG_PREFIX } from '../services/email/email.constants'
@@ -246,29 +247,9 @@ async function sendEmailNotification(
 ): Promise<void> {
   const opts = { immediate: options?.immediate ?? false }
 
-  // ── Normalize ticket/wallet links to always use the configured FRONTEND_URL ──
-  // Prevents frontend-constructed localhost URLs from reaching email templates.
-  if (data.ticketLink) {
-    data.ticketLink = data.ticketLink.replace(/^https?:\/\/[^\/]+/, FRONTEND_URL)
-  }
-  if (data.feedbackLink) {
-    data.feedbackLink = data.feedbackLink.replace(/^https?:\/\/[^\/]+/, FRONTEND_URL)
-  }
-  if (data.walletLink) {
-    data.walletLink = data.walletLink.replace(/^https?:\/\/[^\/]+/, FRONTEND_URL)
-  }
-  if (data.loginUrl) {
-    data.loginUrl = data.loginUrl.replace(/^https?:\/\/[^\/]+/, FRONTEND_URL)
-  }
-  if (data.resetLink) {
-    data.resetLink = data.resetLink.replace(/^https?:\/\/[^\/]+/, FRONTEND_URL)
-  }
-  if (data.adminUrl) {
-    data.adminUrl = data.adminUrl.replace(/^https?:\/\/[^\/]+/, FRONTEND_URL)
-  }
-  if (data.projectLink) {
-    data.projectLink = data.projectLink.replace(/^https?:\/\/[^\/]+/, FRONTEND_URL)
-  }
+  // Application links (ticketLink, walletLink, portalUrl, …) are re-based onto
+  // FRONTEND_URL centrally by every sender in email.service.ts
+  // (utils/frontend-url.ts → withFrontendLinks) — no per-route normalization.
 
   switch (eventType) {
     case 'ticket_created':
@@ -376,6 +357,9 @@ case 'account_activated':
       break
     case 'support_renewal_reminder':
       sendSupportRenewalReminder(to, data, opts)
+      break
+    case 'support_renewal_request':
+      sendSupportRenewalRequest(to, data, opts)
       break
     case 'login_credentials':
       sendLoginCredentials(to, data, opts)

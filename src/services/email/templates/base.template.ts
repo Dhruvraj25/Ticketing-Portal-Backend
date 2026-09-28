@@ -1,3 +1,5 @@
+import { getFrontendUrl } from '../../../utils/frontend-url'
+
 // ============================================================================
 // Email Template Engine — Base Template
 // ============================================================================
@@ -76,7 +78,17 @@ export function getBranding(): BrandingConfig {
     companyLogoUrl: process.env.COMPANY_LOGO_URL || DEFAULT_BRANDING.companyLogoUrl,
     primaryColor: process.env.PRIMARY_COLOR || DEFAULT_BRANDING.primaryColor,
     secondaryColor: process.env.SECONDARY_COLOR || DEFAULT_BRANDING.secondaryColor,
-    portalUrl: process.env.PORTAL_URL || DEFAULT_BRANDING.portalUrl,
+    // Same single source as every other email link (FRONTEND_URL).
+    portalUrl: brandingPortalUrl(),
+  }
+}
+
+/** FRONTEND_URL for the footer link; omitted (never localhost/crash) if unavailable in production. */
+function brandingPortalUrl(): string {
+  try {
+    return getFrontendUrl()
+  } catch {
+    return DEFAULT_BRANDING.portalUrl ?? ''
   }
 }
 

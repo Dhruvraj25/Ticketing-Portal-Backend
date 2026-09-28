@@ -48,6 +48,7 @@ import type {
   RevisionApprovedTemplateData,
   RevisionRejectedTemplateData,
   SupportRenewalReminderTemplateData,
+  SupportRenewalRequestTemplateData,
   LoginCredentialsTemplateData,
 } from './email.types'
 
@@ -80,10 +81,13 @@ import { developerCompletedWorkTemplate } from './templates/developer-completed-
 import { revisionApprovedTemplate } from './templates/revision-approved'
 import { revisionRejectedTemplate } from './templates/revision-rejected'
 import { supportRenewalReminderTemplate } from './templates/support-renewal-reminder'
+import { supportRenewalRequestTemplate } from './templates/support-renewal-request'
 import { loginCredentialsTemplate } from './templates/login-credentials'
 import { getBranding, generatePlainText } from './templates/base.template'
 import type { BrandingConfig } from './templates/base.template'
 import { EMAIL_LOG_PREFIX } from './email.constants'
+import { getActiveTemplateOverride, renderTemplateOverride } from './email-template-overrides'
+import { withFrontendLinks } from '../../utils/frontend-url'
 
 // ─── Utilities ──────────────────────────────────────────────────────────────
 
@@ -154,6 +158,56 @@ export interface SendEmailOptions {
   /** Business event that produced this email — carried to the provider for
    *  template-aware logging and redaction (e.g. password-reset tokens). */
   eventType?: EmailEventType
+  /** Non-sensitive identifiers recorded in email_log. */
+  context?: { ticketNumber?: string; projectName?: string }
+  /** The sender's template data — used to render an admin-customized template, if one is active. */
+  templateData?: object
+}
+
+/** Pick only the non-sensitive identifiers used by Admin → Email Management logs. */
+function logContext(data: object): { ticketNumber?: string; projectName?: string } | undefined {
+  // Previews never log — and must not read fields the TEMPLATE doesn't use
+  // (template variables are derived from the fields a preview render reads).
+  if (previewCapture) return undefined
+  const d = data as { ticketNumber?: unknown; projectName?: unknown }
+  const ctx: { ticketNumber?: string; projectName?: string } = {}
+  if (typeof d.ticketNumber === 'string' && d.ticketNumber) ctx.ticketNumber = d.ticketNumber
+  if (typeof d.projectName === 'string' && d.projectName) ctx.projectName = d.projectName
+  return ctx.ticketNumber || ctx.projectName ? ctx : undefined
+}
+
+// ─── Preview capture (Admin → Email Management template preview) ────────────
+// While a capture is active, send() returns the fully-rendered params instead of
+// enqueueing — so previews use the REAL sender functions (subject + template),
+// never a duplicated copy of them. Synchronous: senders never await.
+let previewCapture: SendEmailParams[] | null = null
+let previewUsesCodeTemplate = false
+
+/**
+ * Re-base every application link in the template data onto FRONTEND_URL (one
+ * central rule for all emails and previews — see utils/frontend-url.ts). Skipped
+ * only while deriving a template's variables, so link fields a template never
+ * uses aren't reported as its variables.
+ */
+function frontendLinks<T extends object>(data: T): T {
+  if (previewCapture && previewUsesCodeTemplate) return data
+  return withFrontendLinks(data)
+}
+
+/**
+ * @param options.codeTemplate  true → ignore any admin-customized template and
+ *   capture the built-in CODE template (used to derive defaults/variables).
+ */
+export function captureEmailPreview(render: () => void, options?: { codeTemplate?: boolean }): SendEmailParams | null {
+  previewCapture = []
+  previewUsesCodeTemplate = !!options?.codeTemplate
+  try {
+    render()
+    return previewCapture[0] ?? null
+  } finally {
+    previewCapture = null
+    previewUsesCodeTemplate = false
+  }
 }
 
 /**
@@ -163,6 +217,18 @@ export interface SendEmailOptions {
  * @returns The email ID (for queued) or send result (for immediate)
  */
 function send(options: SendEmailOptions): string | null {
+  // Admin-customized template (Email Management) replaces the code template's
+  // subject/body for this event, rendered from the same data. No override →
+  // the code template is used unchanged. Everything below (queue, sender,
+  // provider, logging) is identical either way.
+  const override = options.templateData && !(previewCapture && previewUsesCodeTemplate)
+    ? getActiveTemplateOverride(options.eventType)
+    : null
+  if (override && options.templateData) {
+    const rendered = renderTemplateOverride(override, options.templateData)
+    options = { ...options, subject: rendered.subject, html: rendered.html, text: rendered.text ?? options.text }
+  }
+
   // Sanitize subject to prevent header injection
   const safeSubject = sanitizeHeader(options.subject)
 
@@ -189,6 +255,12 @@ function send(options: SendEmailOptions): string | null {
     priority: options.priority || 'normal',
     attachments: options.attachments,
     eventType: options.eventType,
+    context: options.context,
+  }
+
+  if (previewCapture) {
+    previewCapture.push(params)
+    return 'preview'
   }
 
   if (options.immediate) {
@@ -219,6 +291,7 @@ export function sendTicketCreated(
   options?: { immediate?: boolean; cc?: string | string[]; branding?: BrandingConfig },
 ): string | null {
   const branding = resolveBranding(options?.branding)
+  data = frontendLinks(data)
   const html = ticketCreatedTemplate(data, branding)
 
   return send({
@@ -226,6 +299,8 @@ export function sendTicketCreated(
     subject: `[New Ticket #${data.ticketNumber}] ${data.ticketTitle}`,
     html,
     eventType: 'ticket_created',
+    context: logContext(data),
+    templateData: data,
     cc: options?.cc,
     immediate: options?.immediate,
   })
@@ -242,6 +317,7 @@ export function sendTicketAssigned(
   options?: { immediate?: boolean; cc?: string | string[]; branding?: BrandingConfig },
 ): string | null {
   const branding = resolveBranding(options?.branding)
+  data = frontendLinks(data)
   const html = ticketAssignedTemplate(data, branding)
 
   return send({
@@ -249,6 +325,8 @@ export function sendTicketAssigned(
     subject: `[Assigned #${data.ticketNumber}] ${data.ticketTitle}`,
     html,
     eventType: 'ticket_assigned',
+    context: logContext(data),
+    templateData: data,
     cc: options?.cc,
     immediate: options?.immediate,
   })
@@ -265,6 +343,7 @@ export function sendEstimateApproved(
   options?: { immediate?: boolean; cc?: string | string[]; branding?: BrandingConfig },
 ): string | null {
   const branding = resolveBranding(options?.branding)
+  data = frontendLinks(data)
   const html = estimateApprovedTemplate(data, branding)
 
   return send({
@@ -272,6 +351,8 @@ export function sendEstimateApproved(
     subject: `[Estimate Approved #${data.ticketNumber}] ${data.ticketTitle}`,
     html,
     eventType: 'estimate_approved',
+    context: logContext(data),
+    templateData: data,
     cc: options?.cc,
     immediate: options?.immediate,
   })
@@ -288,6 +369,7 @@ export function sendEstimateRejected(
   options?: { immediate?: boolean; cc?: string | string[]; branding?: BrandingConfig },
 ): string | null {
   const branding = resolveBranding(options?.branding)
+  data = frontendLinks(data)
   const html = estimateRejectedTemplate(data, branding)
 
   return send({
@@ -295,6 +377,8 @@ export function sendEstimateRejected(
     subject: `[Estimate Declined #${data.ticketNumber}] ${data.ticketTitle}`,
     html,
     eventType: 'estimate_rejected',
+    context: logContext(data),
+    templateData: data,
     cc: options?.cc,
     immediate: options?.immediate,
   })
@@ -311,6 +395,7 @@ export function sendAdditionalHours(
   options?: { immediate?: boolean; cc?: string | string[]; branding?: BrandingConfig },
 ): string | null {
   const branding = resolveBranding(options?.branding)
+  data = frontendLinks(data)
   const html = additionalHoursTemplate(data, branding)
 
   return send({
@@ -318,6 +403,8 @@ export function sendAdditionalHours(
     subject: `[Additional Hours Required #${data.ticketNumber}] ${data.ticketTitle}`,
     html,
     eventType: 'additional_hours',
+    context: logContext(data),
+    templateData: data,
     cc: options?.cc,
     immediate: options?.immediate,
   })
@@ -334,6 +421,7 @@ export function sendAdditionalHoursRejected(
   options?: { immediate?: boolean; cc?: string | string[]; branding?: BrandingConfig },
 ): string | null {
   const branding = resolveBranding(options?.branding)
+  data = frontendLinks(data)
   const html = additionalHoursRejectedTemplate(data, branding)
 
   return send({
@@ -341,6 +429,8 @@ export function sendAdditionalHoursRejected(
     subject: `[Additional Hours Declined #${data.ticketNumber}] ${data.ticketTitle}`,
     html,
     eventType: 'additional_hours_rejected',
+    context: logContext(data),
+    templateData: data,
     cc: options?.cc,
     immediate: options?.immediate,
   })
@@ -357,6 +447,7 @@ export function sendTicketResolved(
   options?: { immediate?: boolean; cc?: string | string[]; branding?: BrandingConfig },
 ): string | null {
   const branding = resolveBranding(options?.branding)
+  data = frontendLinks(data)
   const html = ticketResolvedTemplate(data, branding)
 
   return send({
@@ -364,6 +455,8 @@ export function sendTicketResolved(
     subject: `[Ready for Review #${data.ticketNumber}] ${data.ticketTitle}`,
     html,
     eventType: 'ticket_resolved',
+    context: logContext(data),
+    templateData: data,
     cc: options?.cc,
     immediate: options?.immediate,
   })
@@ -380,6 +473,7 @@ export function sendTicketClosed(
   options?: { immediate?: boolean; cc?: string | string[]; branding?: BrandingConfig },
 ): string | null {
   const branding = resolveBranding(options?.branding)
+  data = frontendLinks(data)
   const html = ticketClosedTemplate(data, branding)
 
   return send({
@@ -387,6 +481,8 @@ export function sendTicketClosed(
     subject: `[Closed #${data.ticketNumber}] ${data.ticketTitle}`,
     html,
     eventType: 'ticket_closed',
+    context: logContext(data),
+    templateData: data,
     cc: options?.cc,
     immediate: options?.immediate,
   })
@@ -403,6 +499,7 @@ export function sendTicketReopened(
   options?: { immediate?: boolean; cc?: string | string[]; branding?: BrandingConfig },
 ): string | null {
   const branding = resolveBranding(options?.branding)
+  data = frontendLinks(data)
   const html = ticketReopenedTemplate(data, branding)
 
   return send({
@@ -410,6 +507,8 @@ export function sendTicketReopened(
     subject: `[Reopened #${data.ticketNumber}] ${data.ticketTitle}`,
     html,
     eventType: 'ticket_reopened',
+    context: logContext(data),
+    templateData: data,
     cc: options?.cc,
     immediate: options?.immediate,
   })
@@ -426,6 +525,7 @@ export function sendTicketReassigned(
   options?: { immediate?: boolean; cc?: string | string[]; branding?: BrandingConfig },
 ): string | null {
   const branding = resolveBranding(options?.branding)
+  data = frontendLinks(data)
   const html = ticketReassignedTemplate(data, branding)
 
   return send({
@@ -433,6 +533,8 @@ export function sendTicketReassigned(
     subject: `[Reassigned #${data.ticketNumber}] ${data.ticketTitle}`,
     html,
     eventType: 'ticket_reassigned',
+    context: logContext(data),
+    templateData: data,
     cc: options?.cc,
     immediate: options?.immediate,
   })
@@ -449,6 +551,7 @@ export function sendRevisionRequested(
   options?: { immediate?: boolean; cc?: string | string[]; branding?: BrandingConfig },
 ): string | null {
   const branding = resolveBranding(options?.branding)
+  data = frontendLinks(data)
   const html = revisionRequestedTemplate(data, branding)
 
   return send({
@@ -456,6 +559,8 @@ export function sendRevisionRequested(
     subject: `[Revision Requested #${data.ticketNumber}] ${data.ticketTitle}`,
     html,
     eventType: 'revision_requested',
+    context: logContext(data),
+    templateData: data,
     cc: options?.cc,
     immediate: options?.immediate,
   })
@@ -473,6 +578,7 @@ export function sendManagerReview(
   options?: { immediate?: boolean; cc?: string | string[]; branding?: BrandingConfig },
 ): string | null {
   const branding = resolveBranding(options?.branding)
+  data = frontendLinks(data)
   const html = managerReviewTemplate(data, branding)
 
   return send({
@@ -480,6 +586,8 @@ export function sendManagerReview(
     subject: `[Review Needed #${data.ticketNumber}] ${data.ticketTitle}`,
     html,
     eventType: 'manager_review',
+    context: logContext(data),
+    templateData: data,
     cc: options?.cc,
     immediate: options?.immediate,
   })
@@ -499,6 +607,7 @@ export function sendRework(
   options?: { immediate?: boolean; cc?: string | string[]; branding?: BrandingConfig },
 ): string | null {
   const branding = resolveBranding(options?.branding)
+  data = frontendLinks(data)
   const html = reworkTemplate(data, branding)
 
   return send({
@@ -506,6 +615,8 @@ export function sendRework(
     subject: `[Rework Requested #${data.ticketNumber}] ${data.ticketTitle}`,
     html,
     eventType: 'rework',
+    context: logContext(data),
+    templateData: data,
     cc: options?.cc,
     immediate: options?.immediate,
   })
@@ -522,6 +633,7 @@ export function sendEstimateRequested(
   options?: { immediate?: boolean; cc?: string | string[]; branding?: BrandingConfig },
 ): string | null {
   const branding = resolveBranding(options?.branding)
+  data = frontendLinks(data)
   const html = estimateRequestedTemplate(data, branding)
 
   return send({
@@ -529,6 +641,8 @@ export function sendEstimateRequested(
     subject: `[Estimate Ready #${data.ticketNumber}] ${data.ticketTitle}`,
     html,
     eventType: 'estimate_requested',
+    context: logContext(data),
+    templateData: data,
     cc: options?.cc,
     immediate: options?.immediate,
   })
@@ -545,6 +659,7 @@ export function sendAdditionalHoursApproved(
   options?: { immediate?: boolean; cc?: string | string[]; branding?: BrandingConfig },
 ): string | null {
   const branding = resolveBranding(options?.branding)
+  data = frontendLinks(data)
   const html = additionalHoursApprovedTemplate(data, branding)
 
   return send({
@@ -552,6 +667,8 @@ export function sendAdditionalHoursApproved(
     subject: `[Additional Hours Approved #${data.ticketNumber}] ${data.ticketTitle}`,
     html,
     eventType: 'additional_hours_approved',
+    context: logContext(data),
+    templateData: data,
     cc: options?.cc,
     immediate: options?.immediate,
   })
@@ -568,6 +685,7 @@ export function sendWalletEmpty(
   options?: { immediate?: boolean; cc?: string | string[]; branding?: BrandingConfig },
 ): string | null {
   const branding = resolveBranding(options?.branding)
+  data = frontendLinks(data)
   const html = walletEmptyTemplate(data, branding)
 
   return send({
@@ -575,6 +693,8 @@ export function sendWalletEmpty(
     subject: `Support Hours Exhausted — ${data.clientName || data.projectName || 'Client'}`,
     html,
     eventType: 'wallet_empty',
+    context: logContext(data),
+    templateData: data,
     cc: options?.cc,
     immediate: options?.immediate,
   })
@@ -591,6 +711,7 @@ export function sendSupportHoursAdded(
   options?: { immediate?: boolean; cc?: string | string[]; branding?: BrandingConfig },
 ): string | null {
   const branding = resolveBranding(options?.branding)
+  data = frontendLinks(data)
   const html = supportHoursAddedTemplate(data, branding)
 
   return send({
@@ -598,6 +719,8 @@ export function sendSupportHoursAdded(
     subject: `Support Hours Added — ${data.clientName || data.projectName || 'Client'}`,
     html,
     eventType: 'support_hours_added',
+    context: logContext(data),
+    templateData: data,
     cc: options?.cc,
     immediate: options?.immediate,
   })
@@ -614,6 +737,7 @@ export function sendWelcomeEmail(
   options?: { immediate?: boolean; cc?: string | string[]; branding?: BrandingConfig },
 ): string | null {
   const branding = resolveBranding(options?.branding)
+  data = frontendLinks(data)
   const html = welcomeTemplate(data, branding)
 
   return send({
@@ -621,6 +745,8 @@ export function sendWelcomeEmail(
     subject: `Welcome to ${branding.companyName}!`,
     html,
     eventType: 'welcome',
+    context: logContext(data),
+    templateData: data,
     cc: options?.cc,
     immediate: options?.immediate,
   })
@@ -637,6 +763,7 @@ export function sendPasswordReset(
   options?: { immediate?: boolean; cc?: string | string[]; branding?: BrandingConfig },
 ): string | null {
   const branding = resolveBranding(options?.branding)
+  data = frontendLinks(data)
   const html = passwordResetTemplate(data, branding)
 
   return send({
@@ -644,6 +771,8 @@ export function sendPasswordReset(
     subject: `Reset Your ${branding.companyName} Password`,
     html,
     eventType: 'password_reset',
+    context: logContext(data),
+    templateData: data,
     cc: options?.cc,
     immediate: options?.immediate,
   })
@@ -662,6 +791,7 @@ export function sendPasswordResetRequested(
   options?: { immediate?: boolean; cc?: string | string[]; branding?: BrandingConfig },
 ): string | null {
   const branding = resolveBranding(options?.branding)
+  data = frontendLinks(data)
   const html = passwordResetRequestedTemplate(data, branding)
 
   return send({
@@ -669,6 +799,8 @@ export function sendPasswordResetRequested(
     subject: `Password Reset Request — ${data.requesterName || data.requesterEmail}`,
     html,
     eventType: 'password_reset_requested',
+    context: logContext(data),
+    templateData: data,
     cc: options?.cc,
     immediate: options?.immediate,
   })
@@ -685,6 +817,7 @@ export function sendWalletLow(
   options?: { immediate?: boolean; cc?: string | string[]; branding?: BrandingConfig },
 ): string | null {
   const branding = resolveBranding(options?.branding)
+  data = frontendLinks(data)
   const html = walletLowTemplate(data, branding)
 
   return send({
@@ -692,6 +825,8 @@ export function sendWalletLow(
     subject: `Support Hours Running Low — ${data.clientName || data.projectName || 'Client'}`,
     html,
     eventType: 'wallet_low',
+    context: logContext(data),
+    templateData: data,
     cc: options?.cc,
     immediate: options?.immediate,
   })
@@ -708,6 +843,7 @@ export function sendCustomerCreated(
   options?: { immediate?: boolean; cc?: string | string[]; branding?: BrandingConfig },
 ): string | null {
   const branding = resolveBranding(options?.branding)
+  data = frontendLinks(data)
   const html = customerCreatedTemplate(data, branding)
 
   return send({
@@ -715,6 +851,8 @@ export function sendCustomerCreated(
     subject: `Welcome to ${branding.companyName}, ${data.customerName}!`,
     html,
     eventType: 'customer_created',
+    context: logContext(data),
+    templateData: data,
     cc: options?.cc,
     immediate: options?.immediate,
   })
@@ -731,6 +869,7 @@ export function sendAccountActivated(
   options?: { immediate?: boolean; cc?: string | string[]; branding?: BrandingConfig },
 ): string | null {
   const branding = resolveBranding(options?.branding)
+  data = frontendLinks(data)
   const html = accountActivatedTemplate(data, branding)
 
   return send({
@@ -738,6 +877,8 @@ export function sendAccountActivated(
     subject: `Your ${branding.companyName} Account Has Been Activated`,
     html,
     eventType: 'account_activated',
+    context: logContext(data),
+    templateData: data,
     cc: options?.cc,
     immediate: options?.immediate,
   })
@@ -754,6 +895,7 @@ export function sendNewProject(
   options?: { immediate?: boolean; cc?: string | string[]; branding?: BrandingConfig },
 ): string | null {
   const branding = resolveBranding(options?.branding)
+  data = frontendLinks(data)
   const html = newProjectTemplate(data, branding)
 
   return send({
@@ -761,6 +903,8 @@ export function sendNewProject(
     subject: `[New Project] ${data.projectName}`,
     html,
     eventType: 'new_project',
+    context: logContext(data),
+    templateData: data,
     cc: options?.cc,
     immediate: options?.immediate,
   })
@@ -777,6 +921,7 @@ export function sendDeveloperStartedWork(
   options?: { immediate?: boolean; cc?: string | string[]; branding?: BrandingConfig },
 ): string | null {
   const branding = resolveBranding(options?.branding)
+  data = frontendLinks(data)
   const html = developerStartedWorkTemplate(data, branding)
 
   return send({
@@ -784,6 +929,8 @@ export function sendDeveloperStartedWork(
     subject: `[Work Started #${data.ticketNumber}] ${data.ticketTitle}`,
     html,
     eventType: 'developer_started_work',
+    context: logContext(data),
+    templateData: data,
     cc: options?.cc,
     immediate: options?.immediate,
   })
@@ -800,6 +947,7 @@ export function sendDeveloperCompletedWork(
   options?: { immediate?: boolean; cc?: string | string[]; branding?: BrandingConfig },
 ): string | null {
   const branding = resolveBranding(options?.branding)
+  data = frontendLinks(data)
   const html = developerCompletedWorkTemplate(data, branding)
 
   return send({
@@ -807,6 +955,8 @@ export function sendDeveloperCompletedWork(
     subject: `[Work Logged #${data.ticketNumber}] ${data.ticketTitle}`,
     html,
     eventType: 'developer_completed_work',
+    context: logContext(data),
+    templateData: data,
     cc: options?.cc,
     immediate: options?.immediate,
   })
@@ -823,6 +973,7 @@ export function sendRevisionApproved(
   options?: { immediate?: boolean; cc?: string | string[]; branding?: BrandingConfig },
 ): string | null {
   const branding = resolveBranding(options?.branding)
+  data = frontendLinks(data)
   const html = revisionApprovedTemplate(data, branding)
 
   return send({
@@ -830,6 +981,8 @@ export function sendRevisionApproved(
     subject: `[Revision Approved #${data.ticketNumber}] ${data.ticketTitle}`,
     html,
     eventType: 'revision_approved',
+    context: logContext(data),
+    templateData: data,
     cc: options?.cc,
     immediate: options?.immediate,
   })
@@ -846,6 +999,7 @@ export function sendRevisionRejected(
   options?: { immediate?: boolean; cc?: string | string[]; branding?: BrandingConfig },
 ): string | null {
   const branding = resolveBranding(options?.branding)
+  data = frontendLinks(data)
   const html = revisionRejectedTemplate(data, branding)
 
   return send({
@@ -853,6 +1007,8 @@ export function sendRevisionRejected(
     subject: `[Revision Not Approved #${data.ticketNumber}] ${data.ticketTitle}`,
     html,
     eventType: 'revision_rejected',
+    context: logContext(data),
+    templateData: data,
     cc: options?.cc,
     immediate: options?.immediate,
   })
@@ -869,6 +1025,7 @@ export function sendSupportRenewalReminder(
   options?: { immediate?: boolean; cc?: string | string[]; branding?: BrandingConfig },
 ): string | null {
   const branding = resolveBranding(options?.branding)
+  data = frontendLinks(data)
   const html = supportRenewalReminderTemplate(data, branding)
 
   return send({
@@ -876,6 +1033,34 @@ export function sendSupportRenewalReminder(
     subject: `Support Renewal Reminder — ${data.expiryDate ? `expires ${data.expiryDate}` : 'action needed'}`,
     html,
     eventType: 'support_renewal_reminder',
+    context: logContext(data),
+    templateData: data,
+    cc: options?.cc,
+    immediate: options?.immediate,
+  })
+}
+
+// ─── Support Renewal Request ────────────────────────────────────────────────
+
+/**
+ * Send "Support Renewal Request" to the client's Project Manager (client clicked Renew Now).
+ */
+export function sendSupportRenewalRequest(
+  to: string | string[],
+  data: SupportRenewalRequestTemplateData,
+  options?: { immediate?: boolean; cc?: string | string[]; branding?: BrandingConfig },
+): string | null {
+  const branding = resolveBranding(options?.branding)
+  data = frontendLinks(data)
+  const html = supportRenewalRequestTemplate(data, branding)
+
+  return send({
+    to,
+    subject: `Support Renewal Request — ${data.customerCompanyName || data.clientName}`,
+    html,
+    eventType: 'support_renewal_request',
+    context: logContext(data),
+    templateData: data,
     cc: options?.cc,
     immediate: options?.immediate,
   })
@@ -893,6 +1078,7 @@ export function sendLoginCredentials(
   options?: { immediate?: boolean; cc?: string | string[]; branding?: BrandingConfig },
 ): string | null {
   const branding = resolveBranding(options?.branding)
+  data = frontendLinks(data)
   const html = loginCredentialsTemplate(data, branding)
 
   return send({
@@ -900,6 +1086,8 @@ export function sendLoginCredentials(
     subject: `Your ${branding.companyName} Login Credentials`,
     html,
     eventType: 'login_credentials',
+    context: logContext(data),
+    templateData: data,
     cc: options?.cc,
     immediate: options?.immediate,
   })

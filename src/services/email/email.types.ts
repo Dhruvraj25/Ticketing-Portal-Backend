@@ -28,6 +28,7 @@ export type EmailEventType =
   | 'support_hours_added'
   | 'support_hours_assigned'
   | 'support_renewal_reminder'
+  | 'support_renewal_request'
   | 'welcome'
   | 'password_reset'
   | 'password_reset_requested'
@@ -39,6 +40,9 @@ export type EmailEventType =
   | 'revision_approved'
   | 'revision_rejected'
   | 'login_credentials'
+  /** Admin → Email Management: test email / sender verification (not templated). */
+  | 'test_email'
+  | 'sender_verification'
   /**
    * Fallback event type for emails that don't map to a specific event.
    */
@@ -82,6 +86,8 @@ export interface SendEmailParams {
    * and apply event-aware redaction (e.g. password-reset tokens).
    */
   eventType?: EmailEventType
+  /** Non-sensitive identifiers recorded in email_log (Admin → Email Management). */
+  context?: { ticketNumber?: string; projectName?: string }
 }
 
 /**
@@ -91,6 +97,8 @@ export interface SendEmailResult {
   success: boolean
   messageId?: string
   error?: string
+  /** Sender mailbox actually used (recorded in email_log). */
+  from?: string
 }
 
 /**
@@ -114,6 +122,10 @@ export interface EmailQueueEntry {
   retryCount: number
   maxRetries: number
   createdAt: Date
+  /** email_log row handle; updates are chained so they apply in order (null id when logging is unavailable). */
+  logId?: { chain: Promise<number | null> }
+  /** Provider send attempts made so far (for email_log). */
+  attempts?: number
 }
 
 // ─── Provider Interface ────────────────────────────────────────────────────
@@ -429,6 +441,23 @@ export interface SupportRenewalReminderTemplateData extends BaseTemplateData {
   walletLink: string
 }
 
+// ─── Support Renewal Request ───────────────────────────────────────────────
+// Sent to the client's Project Manager when the client clicks "Renew Now".
+
+export interface SupportRenewalRequestTemplateData extends BaseTemplateData {
+  clientName: string
+  clientEmail: string
+  customerCompanyName?: string
+  projectNames: string[]
+  remainingHours?: number
+  totalPurchasedHours?: number
+  expiryDate?: string
+  isLowHours?: boolean
+  isExpiring?: boolean
+  isExpired?: boolean
+  walletLink: string
+}
+
 // ─── Login Credentials ──────────────────────────────────────────────────────
 // Sent when an admin explicitly opts in ("Send login credentials via email")
 // during customer onboarding / user creation. Email-only channel.
@@ -479,6 +508,7 @@ export type EmailTemplateData =
   | RevisionApprovedTemplateData
   | RevisionRejectedTemplateData
   | SupportRenewalReminderTemplateData
+  | SupportRenewalRequestTemplateData
   | LoginCredentialsTemplateData
 
 // ─── Sender Config ──────────────────────────────────────────────────────────

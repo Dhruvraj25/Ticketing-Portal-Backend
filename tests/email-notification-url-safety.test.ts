@@ -23,17 +23,27 @@ const ROUTE_SRC = readFileSync(
 
 const NORMALIZED_FIELDS = ['ticketLink', 'feedbackLink', 'walletLink', 'loginUrl', 'resetLink', 'adminUrl', 'projectLink']
 
-test('email-notification route rewrites every link field to the configured FRONTEND_URL', () => {
-  for (const field of NORMALIZED_FIELDS) {
-    const pattern = new RegExp(
-      `if \\(data\\.${field}\\) \\{\\s*\\n\\s*data\\.${field} = data\\.${field}\\.replace\\(/\\^https\\?:\\\\/\\\\/\\[\\^\\\\/\\]\\+/, FRONTEND_URL\\)`,
-    )
-    assert.match(ROUTE_SRC, pattern, `${field} must be rewritten to FRONTEND_URL before reaching a template`)
+// Link normalization moved from this route into ONE central place that every
+// email passes through (utils/frontend-url.ts → withFrontendLinks, applied by
+// every sender in services/email/email.service.ts), so it now also covers
+// emails that never touch this route and the portalUrl field. Behaviour is
+// verified end-to-end in tests/email-frontend-links.test.ts.
+const FRONTEND_URL_SRC = readFileSync(join(import.meta.dirname, '..', 'src', 'utils', 'frontend-url.ts'), 'utf8')
+const SERVICE_SRC = readFileSync(join(import.meta.dirname, '..', 'src', 'services', 'email', 'email.service.ts'), 'utf8')
+
+test('every link field is re-based onto the configured FRONTEND_URL (central APP_LINK_FIELDS)', () => {
+  for (const field of [...NORMALIZED_FIELDS, 'portalUrl']) {
+    assert.match(FRONTEND_URL_SRC, new RegExp(`'${field}',`), `${field} must be re-based onto FRONTEND_URL before reaching a template`)
   }
+  assert.doesNotMatch(FRONTEND_URL_SRC, /'companyLogoUrl'/, 'external URLs (logo) are never rewritten')
 })
 
-test('the normalization block runs before the eventType switch (applies to every event)', () => {
-  const normalizeIdx = ROUTE_SRC.indexOf('if (data.ticketLink)')
-  const switchIdx = ROUTE_SRC.indexOf('switch (eventType)')
-  assert.ok(normalizeIdx !== -1 && switchIdx !== -1 && normalizeIdx < switchIdx)
+test('every email sender re-bases links BEFORE rendering its template (applies to every event)', () => {
+  const senders = [...SERVICE_SRC.matchAll(/export function (send\w+)\([\s\S]*?\n\}/g)]
+  assert.ok(senders.length >= 31)
+  for (const [body, name] of senders) {
+    const linkIdx = body.indexOf('data = frontendLinks(data)')
+    const renderIdx = body.search(/const html = \w+Template\(data/)
+    assert.ok(linkIdx !== -1 && renderIdx !== -1 && linkIdx < renderIdx, `${name} must re-base links before rendering`)
+  }
 })

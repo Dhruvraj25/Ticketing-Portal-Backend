@@ -567,3 +567,66 @@ export const userRelations = relations(user, ({ many }) => ({
   wallets: many(supportWallet),
   notificationPreferences: many(notificationPreference),
 }))
+
+// --- Email Management (Admin) -----------------------------------------------
+// email_log: one row per outgoing email, written by the email queue
+// (services/email/email.queue.ts). Same shape as the frontend's existing
+// email_log definition (Frontend migration 0015_add_email_log). html_content
+// is deliberately never populated — bodies can contain credentials/reset links.
+export const emailLog = pgTable('email_log', {
+  id: serial('id').primaryKey(),
+  recipientEmail: text('recipient_email').notNull(),
+  recipientName: text('recipient_name'),
+  subject: text('subject').notNull(),
+  eventType: text('event_type').notNull(),
+  status: text('status').notNull().default('pending'),
+  htmlContent: text('html_content'),
+  fromAddress: text('from_address'),
+  sentAt: timestamp('sent_at'),
+  retryCount: integer('retry_count').notNull().default(0),
+  maxRetries: integer('max_retries').notNull().default(3),
+  errorMessage: text('error_message'),
+  dedupKey: text('dedup_key'),
+  metadata: text('metadata'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+})
+
+// email_settings: single row (id = 1) — the ONE authoritative, admin-managed
+// sender configuration. When sender_status = 'verified' the Graph provider
+// sends as sender_email; otherwise it falls back to MICROSOFT_SENDER_EMAIL.
+// Never stores credentials (those stay in environment variables).
+export const emailSettings = pgTable('email_settings', {
+  id: integer('id').primaryKey(),
+  senderEmail: text('sender_email'),
+  senderName: text('sender_name'),
+  senderStatus: text('sender_status').notNull().default('unverified'),
+  senderLastVerifiedAt: timestamp('sender_last_verified_at'),
+  lastVerificationEmail: text('last_verification_email'),
+  lastVerificationError: text('last_verification_error'),
+  lastVerificationAt: timestamp('last_verification_at'),
+  providerStatus: text('provider_status'),
+  providerLastCheckedAt: timestamp('provider_last_checked_at'),
+  providerLastError: text('provider_last_error'),
+  updatedBy: text('updated_by'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+})
+
+// email_templates: admin-customized overrides of the built-in code templates
+// (one per event_type). Reusable text with {{placeholders}} only — never
+// recipient data, credentials or tokens. Active row → used instead of the code
+// template; no row (Reset to Default) → code template.
+export const emailTemplates = pgTable('email_templates', {
+  id: serial('id').primaryKey(),
+  eventType: text('event_type').notNull(),
+  name: text('name').notNull(),
+  subject: text('subject').notNull(),
+  htmlBody: text('html_body').notNull(),
+  textBody: text('text_body'),
+  isActive: boolean('is_active').notNull().default(true),
+  updatedBy: text('updated_by'),
+  createdAt: timestamp('created_at').notNull().defaultNow(),
+  updatedAt: timestamp('updated_at').notNull().defaultNow(),
+}, (table) => ({
+  eventTypeUniqueIdx: uniqueIndex('email_templates_event_type_unique_idx').on(table.eventType),
+}))
