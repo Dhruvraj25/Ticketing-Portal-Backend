@@ -155,6 +155,9 @@ export const ticket = pgTable('ticket', {
   additionalHoursApprovedBy: text('additionalHoursApprovedBy'),
   additionalHoursAutoApproved: boolean('additionalHoursAutoApproved').notNull().default(false),
   additionalHoursDeadline: timestamp('additionalHoursDeadline'),
+  // Existing DB column (added by the Frontend migrations): the estimate
+  // workflow was skipped ("Assign Directly" / historical) → Non-Billable.
+  estimateWorkflowSkipped: boolean('estimateWorkflowSkipped').notNull().default(false),
   // Reservation
   reservedHours: integer('reservedHours'),
   consumedHours: integer('consumedHours'),

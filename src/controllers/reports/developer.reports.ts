@@ -1,4 +1,5 @@
 import { db } from '../../config/db'
+import { timeLogIsBillable } from '../../lib/billing'
 import { ticket, timeLog, user } from '../../models/schema'
 import { and, eq, desc, lte, gte, count, isNotNull, sql, inArray, sum } from 'drizzle-orm'
 import { TicketStatus as TS } from '../../types/index'
@@ -78,7 +79,7 @@ export async function getWorklogReport(filters: ReportFilters, currentUser: { id
       userId: timeLog.userId,
       ticketId: timeLog.ticketId,
       durationMinutes: timeLog.durationMinutes,
-      isBillable: timeLog.isBillable,
+      isBillable: timeLogIsBillable,
       startTime: timeLog.startTime,
     })
     .from(timeLog)
@@ -107,7 +108,7 @@ export async function getWorklogReport(filters: ReportFilters, currentUser: { id
 
 export async function getBillableHoursReport(filters: ReportFilters, currentUser: { id: string; role: string }): Promise<ReportResult> {
   const { since, until } = getDateRange(filters.dateFrom, filters.dateTo)
-  const conditions: any[] = [eq(timeLog.isBillable, true), gte(timeLog.startTime, since), lte(timeLog.startTime, until), isNotNull(timeLog.endTime)]
+  const conditions: any[] = [timeLogIsBillable, gte(timeLog.startTime, since), lte(timeLog.startTime, until), isNotNull(timeLog.endTime)]
   if (filters.developerId) conditions.push(eq(timeLog.userId, filters.developerId))
 
   // OPTIMIZED: Select only needed columns
@@ -127,7 +128,7 @@ export async function getBillableHoursReport(filters: ReportFilters, currentUser
 
 export async function getNonBillableHoursReport(filters: ReportFilters, currentUser: { id: string; role: string }): Promise<ReportResult> {
   const { since, until } = getDateRange(filters.dateFrom, filters.dateTo)
-  const conditions: any[] = [eq(timeLog.isBillable, false), gte(timeLog.startTime, since), lte(timeLog.startTime, until), isNotNull(timeLog.endTime)]
+  const conditions: any[] = [sql`NOT ${timeLogIsBillable}`, gte(timeLog.startTime, since), lte(timeLog.startTime, until), isNotNull(timeLog.endTime)]
   if (filters.developerId) conditions.push(eq(timeLog.userId, filters.developerId))
 
   // OPTIMIZED: Select only needed columns

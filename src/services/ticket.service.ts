@@ -1,4 +1,5 @@
 import { inArray } from 'drizzle-orm'
+import { isBillableTicket } from '../lib/billing'
 import { ticket as ticketTable } from '../models/schema'
 import * as ticketRepo from '../repositories/ticket.repository'
 import * as userRepo from '../repositories/user.repository'
@@ -460,7 +461,9 @@ export async function startTimer(ticketId: number, description: string | undefin
     const descErr = validateField(description, VALIDATION.DESCRIPTION_MAX_LENGTH, 'Timer description')
     if (descErr) throw new BadRequestError(descErr)
   }
-  const newLog = await ticketRepo.createTimeLog({ ticketId, userId: userData.id, description, startTime: new Date(), isBillable: true })
+  // Billable from the ticket's workflow (lib/billing.ts) — never hard-coded.
+  const isBillable = isBillableTicket(await ticketRepo.getBillingFacts(ticketId))
+  const newLog = await ticketRepo.createTimeLog({ ticketId, userId: userData.id, description, startTime: new Date(), isBillable })
   await ticketRepo.createHistory({ ticketId, userId: userData.id, action: 'timer_started', newValue: 'Timer started' })
   return newLog
 }
@@ -498,7 +501,9 @@ export async function resumeTimer(timeLogId: number, ticketId: number, descripti
     const descErr = validateField(description, VALIDATION.DESCRIPTION_MAX_LENGTH, 'Timer description')
     if (descErr) throw new BadRequestError(descErr)
   }
-  const newLog = await ticketRepo.createTimeLog({ ticketId, userId: userData.id, description, startTime: new Date(), isBillable: true })
+  // Billable from the ticket's workflow (lib/billing.ts) — never hard-coded.
+  const isBillable = isBillableTicket(await ticketRepo.getBillingFacts(ticketId))
+  const newLog = await ticketRepo.createTimeLog({ ticketId, userId: userData.id, description, startTime: new Date(), isBillable })
   await ticketRepo.createHistory({ ticketId, userId: userData.id, action: 'timer_resumed', newValue: 'Timer resumed' })
   return newLog
 }

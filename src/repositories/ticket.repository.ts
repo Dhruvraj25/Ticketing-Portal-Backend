@@ -364,3 +364,13 @@ export async function sumDurationByUser(userId: string) {
   return Number(row?.total) || 0
 }
 
+
+/** The ticket fields the billing rule reads (lib/billing.ts isBillableTicket). */
+export async function getBillingFacts(ticketId: number) {
+  const [row] = await db
+    .select({ estimateWorkflowSkipped: ticket.estimateWorkflowSkipped, assignedToId: ticket.assignedToId, consumedHours: ticket.consumedHours })
+    .from(ticket)
+    .where(eq(ticket.id, ticketId))
+    .limit(1)
+  return row ?? {}
+}
