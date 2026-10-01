@@ -1,11 +1,13 @@
 import { db } from '../config/db'
-import { supportWallet, walletTransaction, walletAlert, project, ticket, module } from '../models/schema'
+import { supportWallet, walletTransaction, walletAlert, project, ticket, module, user } from '../models/schema'
+import { alias } from 'drizzle-orm/pg-core'
 import { and, eq, desc, count, inArray, lte, gte, isNull, sql } from 'drizzle-orm'
 
 // ─── Select helper — common columns returned for wallet queries ────────────
 const walletColumns = {
   id: supportWallet.id,
   clientId: supportWallet.clientId,
+  companyId: supportWallet.companyId,
   projectId: supportWallet.projectId,
   totalPurchasedHours: supportWallet.totalPurchasedHours,
   reservedHours: supportWallet.reservedHours,
@@ -29,36 +31,15 @@ export async function findById(id: number) {
   return row ?? null
 }
 
-// ─── Find the ONE wallet for a client ──────────────────────────────────────
+// ─── Find the ONE wallet of a company ──────────────────────────────────────
 
-/**
- * Returns the active or inactive wallet for a client.
- * In the one-wallet-per-client architecture, there should be exactly one.
- * Falls back to any wallet (including suspended/expired) if no active one exists.
- */
-export async function findByClientId(clientId: string) {
-  // Prefer active wallet first, then inactive, then any
+/** The company's wallet (one per company — unique support_wallet.companyId). */
+export async function findByCompanyId(companyId: number | null | undefined) {
+  if (companyId == null) return null
   const [row] = await db
     .select(walletColumns)
     .from(supportWallet)
-    .where(eq(supportWallet.clientId, clientId))
-    .orderBy(
-      // Priority: active > inactive > suspended > expired
-      sql`CASE ${supportWallet.status} WHEN 'active' THEN 0 WHEN 'inactive' THEN 1 WHEN 'suspended' THEN 2 WHEN 'expired' THEN 3 ELSE 4 END`,
-      desc(supportWallet.updatedAt),
-    )
-    .limit(1)
-  return row ?? null
-}
-
-/**
- * Find wallet for client with specific status.
- */
-export async function findByClientIdAndStatus(clientId: string, status: string) {
-  const [row] = await db
-    .select(walletColumns)
-    .from(supportWallet)
-    .where(and(eq(supportWallet.clientId, clientId), eq(supportWallet.status, status)))
+    .where(eq(supportWallet.companyId, companyId))
     .limit(1)
   return row ?? null
 }
@@ -80,13 +61,13 @@ export async function findAll() {
     .orderBy(desc(supportWallet.updatedAt))
 }
 
-/** Wallets belonging to any of the given client ids (tenant-scoped). */
-export async function findManyByClientIds(clientIds: string[]) {
-  if (clientIds.length === 0) return []
+/** Wallets of the given companies (tenant-scoped). */
+export async function findManyByCompanyIds(companyIds: number[]) {
+  if (companyIds.length === 0) return []
   return db
     .select(walletColumns)
     .from(supportWallet)
-    .where(inArray(supportWallet.clientId, clientIds))
+    .where(inArray(supportWallet.companyId, companyIds))
     .orderBy(desc(supportWallet.updatedAt))
 }
 
@@ -94,10 +75,11 @@ export async function findManyByClientIds(clientIds: string[]) {
 
 /**
  * Insert a new wallet row. Called by ensureWalletForClient after checking
- * that no wallet exists for the given clientId.
+ * that the company has no wallet yet (clientId = primary contact).
  */
 export async function insert(data: {
   clientId: string
+  companyId: number
   projectId?: number | null
   totalPurchasedHours?: number
   reservedHours?: number
@@ -115,6 +97,7 @@ export async function insert(data: {
 
   const insertData: typeof supportWallet.$inferInsert = {
     clientId: data.clientId,
+    companyId: data.companyId,
     projectId: data.projectId ?? null,
     totalPurchasedHours: data.totalPurchasedHours ?? 0,
     reservedHours: data.reservedHours ?? 0,
@@ -192,11 +175,23 @@ export async function findLowBalance(threshold: number) {
 
 // ─── Ticket consumption (per project breakdown for a client wallet) ────────
 
+/** Tickets drawing on a company's wallet: COALESCE(project owner's company, raiser's company). */
+function ticketOfCompany(companyId: number) {
+  const owner = alias(user, 'project_owner')
+  const raiser = alias(user, 'ticket_raiser')
+  return {
+    owner,
+    raiser,
+    condition: sql`COALESCE(${owner.companyId}, ${raiser.companyId}) = ${companyId}`,
+  }
+}
+
 /**
- * Find all tickets that have consumed hours from the client's wallet,
+ * Find all tickets that have consumed hours from the company's wallet,
  * broken down by project. Used for usage-by-project reporting.
  */
-export async function findTicketConsumptionByProject(clientId: string) {
+export async function findTicketConsumptionByProject(companyId: number) {
+  const scope = ticketOfCompany(companyId)
   return db
     .select({
       projectId: ticket.projectId,
@@ -207,8 +202,10 @@ export async function findTicketConsumptionByProject(clientId: string) {
     })
     .from(ticket)
     .leftJoin(project, eq(ticket.projectId, project.id))
+    .leftJoin(scope.owner, eq(scope.owner.id, project.clientId))
+    .leftJoin(scope.raiser, eq(scope.raiser.id, ticket.clientId))
     .where(and(
-      eq(ticket.clientId, clientId),
+      scope.condition,
       eq(ticket.status, 'closed'),
     ))
     .groupBy(ticket.projectId, project.projectName)
@@ -216,10 +213,11 @@ export async function findTicketConsumptionByProject(clientId: string) {
 }
 
 /**
- * Find all tickets that have consumed hours from the client's wallet,
+ * Find all tickets that have consumed hours from the company's wallet,
  * broken down by project and module. Used for detailed usage reporting.
  */
-export async function findTicketConsumptionByModule(clientId: string) {
+export async function findTicketConsumptionByModule(companyId: number) {
+  const scope = ticketOfCompany(companyId)
   return db
     .select({
       projectId: ticket.projectId,
@@ -233,18 +231,19 @@ export async function findTicketConsumptionByModule(clientId: string) {
     .from(ticket)
     .leftJoin(project, eq(ticket.projectId, project.id))
     .leftJoin(module, eq(ticket.moduleId, module.id))
+    .leftJoin(scope.owner, eq(scope.owner.id, project.clientId))
+    .leftJoin(scope.raiser, eq(scope.raiser.id, ticket.clientId))
     .where(and(
-      eq(ticket.clientId, clientId),
+      scope.condition,
       eq(ticket.status, 'closed'),
     ))
     .groupBy(ticket.projectId, project.projectName, ticket.moduleId, module.moduleName)
     .orderBy(desc(sql`COALESCE(SUM(${ticket.consumedHours}), 0)`))
 }
 
-/**
- * Find tickets for a specific project/client (backward compat for existing UI).
- */
-export async function findTicketsByProjectAndClient(projectId: number, clientId: string) {
+/** Every ticket that draws on the company's wallet (newest first). */
+export async function findTicketsForCompany(companyId: number) {
+  const scope = ticketOfCompany(companyId)
   return db
     .select({
       id: ticket.id,
@@ -256,6 +255,9 @@ export async function findTicketsByProjectAndClient(projectId: number, clientId:
       createdAt: ticket.createdAt,
     })
     .from(ticket)
-    .where(and(eq(ticket.projectId, projectId), eq(ticket.clientId, clientId)))
+    .leftJoin(project, eq(ticket.projectId, project.id))
+    .leftJoin(scope.owner, eq(scope.owner.id, project.clientId))
+    .leftJoin(scope.raiser, eq(scope.raiser.id, ticket.clientId))
+    .where(scope.condition)
     .orderBy(desc(ticket.createdAt))
 }

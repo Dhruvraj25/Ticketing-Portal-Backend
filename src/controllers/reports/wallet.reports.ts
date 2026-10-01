@@ -1,68 +1,69 @@
 import { db } from '../../config/db'
-import { supportWallet, walletTransaction, project, ticket, module, user } from '../../models/schema'
+import { supportWallet, walletTransaction, project, ticket, module, user, company } from '../../models/schema'
 import { and, eq, desc, count, inArray, gte, lte, sum, sql } from 'drizzle-orm'
 import type { ReportFilters, ReportResult } from './types'
-import { getDateRange, getClientScopeCondition } from './utils'
+import { getDateRange } from './utils'
+import { companyIdOfUser, companyIdsManagedBy } from '../../lib/company-wallet'
 
 /**
- * Get wallet IDs visible to the current user based on their role.
- * In the one-wallet-per-client architecture, each client has exactly one wallet.
- * Clients see their organization's wallets; Admins/Managers can filter by clientId.
+ * Company-wallet scope: client → their company's wallet; project manager →
+ * wallets of companies whose projects they manage; admin → all. A client
+ * filter means that client's company wallet. null = nothing visible.
  */
-async function getVisibleWalletIds(currentUser: { id: string; role: string }, filters: ReportFilters): Promise<number[]> {
-  const walletIds: Set<number> = new Set()
-
+async function walletScopeConditions(currentUser: { id: string; role: string }, filters: ReportFilters): Promise<any[] | null> {
+  const conditions: any[] = []
   if (currentUser.role === 'client') {
-    const scope = await getClientScopeCondition(currentUser.id)
-    const clientIds = scope?.clientIds || [currentUser.id]
-    const wallets = await db
-      .select({ id: supportWallet.id })
-      .from(supportWallet)
-      .where(inArray(supportWallet.clientId, clientIds))
-    wallets.forEach(w => walletIds.add(w.id))
+    const own = await companyIdOfUser(currentUser.id)
+    if (own == null) return null
+    conditions.push(eq(supportWallet.companyId, own))
+  } else if (currentUser.role === 'project_manager') {
+    const managed = await companyIdsManagedBy(currentUser.id)
+    if (managed.length === 0) return null
+    conditions.push(inArray(supportWallet.companyId, managed))
+  } else if (currentUser.role !== 'admin') {
+    return null
   }
-
   if (filters.clientId) {
-    const wallets = await db
-      .select({ id: supportWallet.id })
-      .from(supportWallet)
-      .where(eq(supportWallet.clientId, filters.clientId))
-    wallets.forEach(w => walletIds.add(w.id))
+    const filterCompanyId = await companyIdOfUser(filters.clientId)
+    if (filterCompanyId == null) return null
+    conditions.push(eq(supportWallet.companyId, filterCompanyId))
   }
-
-  // Admin or manager with no specific filter: see all wallets
-  if (walletIds.size === 0 && currentUser.role !== 'client') {
-    const wallets = await db
-      .select({ id: supportWallet.id })
-      .from(supportWallet)
-    wallets.forEach(w => walletIds.add(w.id))
-  }
-
-  return [...walletIds]
+  return conditions
 }
 
 /**
- * Support Wallet Report — One row per client wallet.
- * Each client has exactly ONE wallet in the new architecture.
+ * Get wallet IDs visible to the current user (one wallet per company).
+ */
+async function getVisibleWalletIds(currentUser: { id: string; role: string }, filters: ReportFilters): Promise<number[]> {
+  const conditions = await walletScopeConditions(currentUser, filters)
+  if (conditions === null) return []
+  const wallets = await db
+    .select({ id: supportWallet.id })
+    .from(supportWallet)
+    .where(conditions.length > 0 ? and(...conditions) : undefined)
+  return wallets.map(w => w.id)
+}
+
+/**
+ * Support Wallet Report — One row per company wallet.
+ * Each company has exactly ONE wallet, shared by all of its client users.
  */
 export async function getSupportWalletReport(filters: ReportFilters, currentUser: { id: string; role: string }): Promise<ReportResult> {
-  const conditions: any[] = []
-  if (currentUser.role === 'client') {
-    const scope = await getClientScopeCondition(currentUser.id)
-    if (scope) conditions.push(inArray(supportWallet.clientId, scope.clientIds))
-  }
-  if (filters.clientId) conditions.push(eq(supportWallet.clientId, filters.clientId))
+  const scope = await walletScopeConditions(currentUser, filters)
+  const conditions: any[] = scope ?? []
 
-  const wallets = await db
+  const wallets = scope === null ? [] : await db
     .select({
       id: supportWallet.id,
       clientId: supportWallet.clientId,
+      companyName: company.name,
       totalPurchasedHours: supportWallet.totalPurchasedHours,
       consumedHours: supportWallet.consumedHours,
       remainingHours: supportWallet.remainingHours,
       status: supportWallet.status,
     })
     .from(supportWallet)
+    .leftJoin(company, eq(company.id, supportWallet.companyId))
     .where(conditions.length > 0 ? and(...conditions) : undefined)
 
   const totalPurchased = wallets.reduce((s, w) => s + Number(w.totalPurchasedHours), 0)
@@ -82,21 +83,21 @@ export async function getSupportWalletReport(filters: ReportFilters, currentUser
       generatedAt: new Date().toISOString(),
       appliedFilters: Object.entries(filters).filter(([_, v]) => v).map(([k]) => k.replace(/_/g, ' ')),
       summary: {
-        'Total Client Wallets': wallets.length,
+        'Total Company Wallets': wallets.length,
         'Total Purchased': `${totalPurchased}h`,
         'Total Consumed': `${totalConsumed}h`,
         'Total Remaining': `${totalRemaining}h`,
       },
     },
     columns: [
-      { key: 'clientName', label: 'Client', type: 'text' },
+      { key: 'clientName', label: 'Company', type: 'text' },
       { key: 'totalPurchasedHours', label: 'Purchased', type: 'number' },
       { key: 'consumedHours', label: 'Consumed', type: 'number' },
       { key: 'remainingHours', label: 'Remaining', type: 'number' },
       { key: 'status', label: 'Status', type: 'badge' },
     ],
     data: wallets.map(w => ({
-      clientName: clientMap.get(w.clientId) || w.clientId,
+      clientName: w.companyName || clientMap.get(w.clientId) || w.clientId,
       totalPurchasedHours: w.totalPurchasedHours,
       consumedHours: w.consumedHours,
       remainingHours: w.remainingHours,
@@ -104,9 +105,9 @@ export async function getSupportWalletReport(filters: ReportFilters, currentUser
     })),
     charts: [{
       type: 'bar',
-      title: 'Remaining Hours per Client Wallet',
+      title: 'Remaining Hours per Company Wallet',
       data: wallets.map(w => ({
-        name: clientMap.get(w.clientId) || `Client`,
+        name: w.companyName || clientMap.get(w.clientId) || `Company`,
         value: Number(w.remainingHours),
       })),
     }],

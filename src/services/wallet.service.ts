@@ -1,33 +1,22 @@
 import * as walletRepo from '../repositories/wallet.repository'
-import * as projectRepo from '../repositories/project.repository'
-import { db } from '../config/db'
-import { project as projectTable } from '../models/schema'
-import { inArray } from 'drizzle-orm'
 import { assertFound, ForbiddenError } from '../utils/errors'
+import { companyIdForTicket, companyIdOfUser, companyIdsManagedBy } from '../lib/company-wallet'
 
 // ─── Tenant scoping helpers ────────────────────────────────────────────────
-// Wallets belong to a client organization. Clients may only see their own
-// org's wallet; managers may only see wallets of clients on projects they
-// manage; admins see everything. Developers have no wallet access.
+// Wallets belong to a COMPANY (one wallet per company, shared by all of its
+// client users). Clients may only see their own company's wallet; managers
+// may only see wallets of companies whose projects they manage; admins see
+// everything. Developers have no wallet access.
 
-/** Client IDs whose projects the manager manages. */
-async function getManagerScopedClientIds(managerId: string): Promise<string[]> {
-  const rows = await db
-    .select({ clientId: projectTable.clientId })
-    .from(projectTable)
-    .where(inArray(projectTable.managerId, [managerId]))
-  return [...new Set(rows.map(r => r.clientId))]
-}
-
-async function assertWalletAccess(wallet: { id: number; clientId: string }, user: { id: string; role: string }) {
+async function assertWalletAccess(wallet: { id: number; companyId: number | null }, user: { id: string; role: string }) {
   if (user.role === 'admin') return
+  if (wallet.companyId == null) throw new ForbiddenError('Access denied')
   if (user.role === 'client') {
-    if (wallet.clientId !== user.id) throw new ForbiddenError('Access denied')
+    if (wallet.companyId !== (await companyIdOfUser(user.id))) throw new ForbiddenError('Access denied')
     return
   }
   if (user.role === 'project_manager') {
-    const scoped = await getManagerScopedClientIds(user.id)
-    if (scoped.includes(wallet.clientId)) return
+    if ((await companyIdsManagedBy(user.id)).includes(wallet.companyId)) return
     throw new ForbiddenError('Access denied')
   }
   throw new ForbiddenError('Access denied')
@@ -36,10 +25,10 @@ async function assertWalletAccess(wallet: { id: number; clientId: string }, user
 // ─── Ensure Wallet Exists (Idempotent) ─────────────────────────────────────
 
 /**
- * Ensures a client has exactly one support wallet.
- * If no wallet exists, creates one.
- * If a wallet already exists, returns it.
- * Never creates duplicates.
+ * Ensures the client's COMPANY has exactly one support wallet.
+ * If the company has no wallet, creates one (this client = primary contact).
+ * If the company already has a wallet, returns it — never a second wallet
+ * (also enforced by the unique index on support_wallet.companyId).
  *
  * This is the ONLY place new wallets should be created.
  */
@@ -52,13 +41,16 @@ export async function ensureWalletForClient(
     contractEndDate?: Date | string | null
   },
 ) {
-  const existing = await walletRepo.findByClientId(clientId)
+  const companyId = await companyIdOfUser(clientId)
+  if (companyId == null) throw new Error(`Client ${clientId} has no company — cannot create a company wallet.`)
+  const existing = await walletRepo.findByCompanyId(companyId)
   if (existing) return existing
 
-  // Create a new client-level wallet (no projectId)
+  // Create the company-level wallet (no projectId)
   return walletRepo.insert({
     clientId,
-    projectId: null, // Wallets are client-level, not project-level
+    companyId,
+    projectId: null, // Wallets are company-level, not project-level
     totalPurchasedHours: options?.totalPurchasedHours ?? 0,
     reservedHours: 0,
     consumedHours: 0,
@@ -73,19 +65,18 @@ export async function ensureWalletForClient(
 
 /**
  * Get wallets scoped to the caller:
- *   - client: their organization's single wallet
- *   - project_manager: wallets of clients on projects they manage
+ *   - client: their company's single wallet
+ *   - project_manager: wallets of companies whose projects they manage
  *   - admin: all wallets
  *   - developer: none
  */
 export async function getWallets(currentUser: { id: string; role: string }) {
   if (currentUser.role === 'client') {
-    const wallet = await walletRepo.findByClientId(currentUser.id)
+    const wallet = await walletRepo.findByCompanyId(await companyIdOfUser(currentUser.id))
     return wallet ? [wallet] : []
   }
   if (currentUser.role === 'project_manager') {
-    const clientIds = await getManagerScopedClientIds(currentUser.id)
-    return walletRepo.findManyByClientIds(clientIds)
+    return walletRepo.findManyByCompanyIds(await companyIdsManagedBy(currentUser.id))
   }
   if (currentUser.role === 'admin') {
     return walletRepo.findMany([])
@@ -119,7 +110,7 @@ export async function getWalletTransactions(walletId: number, currentUser?: { id
 
 /**
  * Get ticket consumption breakdown by project for a wallet.
- * Uses the client's ticket history, not project-specific wallet.
+ * Covers every ticket of the wallet's company (all of its users).
  */
 export async function getWalletTicketConsumption(walletId: number, currentUser?: { id: string; role: string }) {
   const w = await walletRepo.findById(walletId)
@@ -129,15 +120,11 @@ export async function getWalletTicketConsumption(walletId: number, currentUser?:
     await assertWalletAccess(w, currentUser)
   }
 
+  if (w.companyId == null) return { byProject: [], tickets: [] }
   // Return breakdown by project
-  const byProject = await walletRepo.findTicketConsumptionByProject(w.clientId)
+  const byProject = await walletRepo.findTicketConsumptionByProject(w.companyId)
   // Also return per-ticket detail
-  const tickets = await walletRepo.findTicketsByProjectAndClient(
-    // For backward compat: we still query across all projects for this client
-    // Using a special case: pass 0 as projectId to indicate "all projects"
-    0, // sentinel — handled by the updated query below
-    w.clientId,
-  )
+  const tickets = await walletRepo.findTicketsForCompany(w.companyId)
 
   return { byProject, tickets }
 }
@@ -145,9 +132,9 @@ export async function getWalletTicketConsumption(walletId: number, currentUser?:
 // ─── Add Hours ─────────────────────────────────────────────────────────────
 
 /**
- * Add support hours to a client wallet. Admins may recharge any client;
- * managers may only recharge clients on projects they manage. Clients can
- * never add hours to their own wallet.
+ * Add support hours to a company wallet. Admins may recharge any company;
+ * managers may only recharge companies whose projects they manage. Clients
+ * can never add hours to their own wallet.
  */
 export async function addWalletHours(data: any, currentUser: any) {
   if (!currentUser || (currentUser.role !== 'admin' && currentUser.role !== 'project_manager')) {
@@ -191,8 +178,8 @@ export async function addWalletHours(data: any, currentUser: any) {
 // ─── Deduct Hours (from ticket closure) ────────────────────────────────────
 
 /**
- * Deduct hours from a client wallet when a ticket is closed.
- * Resolves the wallet through the client, NOT through the project.
+ * Deduct hours from the ticket's COMPANY wallet when a ticket is closed
+ * (ticket → project → company, else the raiser's company).
  */
 export async function deductHoursFromWallet(params: {
   clientId: string
@@ -203,9 +190,9 @@ export async function deductHoursFromWallet(params: {
   performedBy: string
   reason?: string
 }) {
-  const w = await walletRepo.findByClientId(params.clientId)
+  const w = await walletRepo.findByCompanyId(await companyIdForTicket({ clientId: params.clientId, projectId: params.projectId ?? null }))
   if (!w) {
-    console.error(`[Wallet] No wallet found for client ${params.clientId}. Cannot deduct ${params.hours}h.`)
+    console.error(`[Wallet] No company wallet found for ticket #${params.ticketId}. Cannot deduct ${params.hours}h.`)
     return null
   }
 
@@ -246,13 +233,13 @@ export async function deductHoursFromWallet(params: {
 
 /**
  * Check if a client has sufficient hours to create a ticket.
- * Uses the client's single wallet.
+ * Uses the client's company wallet.
  */
 export async function checkClientCanCreateTicket(
   clientId: string,
   requiredHours: number,
 ): Promise<{ allowed: boolean; remainingHours: number; walletId: number | null }> {
-  const w = await walletRepo.findByClientId(clientId)
+  const w = await walletRepo.findByCompanyId(await companyIdOfUser(clientId))
   if (!w) {
     return { allowed: false, remainingHours: 0, walletId: null }
   }
@@ -287,7 +274,7 @@ export async function getWalletDashboardStats(currentUser?: { id: string; role: 
     totalRemaining,
     lowBalanceClients,
     activeWallets,
-    totalWallets: wallets.length, // This equals the number of clients with wallets
+    totalWallets: wallets.length, // This equals the number of companies with wallets
   }
 }
 
